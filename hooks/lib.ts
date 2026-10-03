@@ -45,12 +45,13 @@ export type FitCommand =
   | { kind: 'reset' }
   | { kind: 'intro' }
   | { kind: 'program' }
+  | { kind: 'swap'; exercise?: string }
   | { kind: 'strict'; isOn: boolean }
   | { kind: 'add'; n: number }
   | { kind: 'set'; n: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | rest | score | program | rules | coach strict|easy | tour | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest | score | program | rules | coach strict|easy | tour | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -58,6 +59,7 @@ export const parseFit = (args: string): FitCommand => {
   if (head === 'score') return { kind: 'week' }
   if (head === 'rest') return { kind: 'skip' }
   if (head === 'program') return { kind: 'program' }
+  if (head === 'swap') return value === undefined ? { kind: 'swap' } : { kind: 'swap', exercise: value.toLowerCase() }
   if (head === 'rules') return { kind: 'help' }
   if (head === 'hide') return { kind: 'hide' }
   if (head === 'reset') return { kind: 'reset' }
@@ -154,6 +156,14 @@ export const parseCustom = (text: string): Routine | undefined => {
   return Number(goal) > 0 ? daily(exercise.toLowerCase(), Number(goal)) : undefined
 }
 
+// Today's exercise, swapped: the next one in the routine, or the one named.
+export const pickSwap = (routine: Routine, current: string, wanted?: string) => {
+  const plans = [...new Map(Object.values(routine).map(plan => [plan.exercise, plan])).values()]
+  if (wanted !== undefined) return plans.find(plan => plan.exercise.toLowerCase() === wanted)
+  const at = plans.findIndex(plan => plan.exercise === current)
+  return plans[(at + 1) % plans.length]
+}
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
@@ -172,6 +182,7 @@ or press **+5 / +10 / +25** above the prompt
 | \`/fit\` | today's progress |
 | \`/fit set 80\` | fix today's count |
 | \`/fit reset\` | today back to 0 |
+| \`/fit swap\` | switch today's exercise |
 | \`/fit rest\` | rest day (breaks streak) |
 | \`/fit score\` | streak + grid |
 | \`/fit program\` | pick your training |

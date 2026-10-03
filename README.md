@@ -18,6 +18,7 @@ A Claude Code mod for a daily rep goal. Claude lifts the code, you lift the weig
 | `/fit 20` | log 20 reps |
 | `/fit set 80` | fix today's count |
 | `/fit reset` | today back to 0 |
+| `/fit swap [exercise]` | switch today's exercise (next in your program, or the one named) |
 | `/fit rest` | rest day (breaks streak, clears debt) |
 | `/fit score` | streak + grid |
 | `/fit program` | pick your program |

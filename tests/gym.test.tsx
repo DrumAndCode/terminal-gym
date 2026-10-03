@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseCustom, parseFit, progressColor, scale, streak } from '../hooks/lib'
+import { parseCustom, parseFit, pickSwap, progressColor, scale, streak } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -353,4 +353,29 @@ test('/fit program opens the walkthrough', async ($, on) => {
   const ran = await fit($, 'program')
   expect(ran.text).toContain('Pick your program')
   expect(open.has('gym-onboard')).toBe(true)
+})
+
+describe('swap', () => {
+  test('pickSwap cycles or picks by name', async () => {
+    const routine = {
+      mon: { exercise: 'pushups', goal: 100 },
+      tue: { exercise: 'dips', goal: 100 },
+      wed: { exercise: 'squats', goal: 300 },
+    }
+    expect(pickSwap(routine, 'pushups')?.exercise).toBe('dips')
+    expect(pickSwap(routine, 'squats')?.exercise).toBe('pushups')
+    expect(pickSwap(routine, 'pushups', 'squats')).toEqual({ exercise: 'squats', goal: 300 })
+    expect(pickSwap(routine, 'pushups', 'burpees')).toBeUndefined()
+  })
+
+  test('/fit swap changes today and sticks for the day', async ($, on) => {
+    const { files } = world(on)
+    await start($)
+    const ran = await fit($, 'swap squats')
+    expect(ran.text).toContain('0/300 squats')
+    expect(files.has(`${LOG}/2026-10-05.swap`)).toBe(true)
+    expect((await fit($, '')).text).toContain('squats')
+    expect((await fit($, 'swap')).text).toContain('pushups')
+    expect((await fit($, 'swap burpees')).text).toContain('No burpees')
+  })
 })

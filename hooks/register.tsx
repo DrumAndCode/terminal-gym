@@ -13,6 +13,7 @@ import {
   heatCells,
   lastDays,
   parseFit,
+  pickSwap,
   progressColor,
   scale,
   streak,
@@ -59,10 +60,17 @@ const readCount = async ($: $, path: string) => {
   return Number.isFinite(n) ? n : 0
 }
 
+// `/fit swap` leaves the day's plan beside its count as `<date>.swap`.
+const readSwap = async ($: $, logDir: string, date: string): Promise<Routine[string] | undefined> => {
+  const path = `${logDir}/${date}.swap`
+  return (await $.fs.exists(path)) ? (JSON.parse(await $.fs.read(path)) as Routine[string]) : undefined
+}
+
 const refreshToday = async ($: $): Promise<Today> => {
   const { routine, log: logDir } = await files($)
-  const plan = (await loadRoutine($, routine))[weekdayKey(await $.clock.now())]
   const date = dayKey(await $.clock.now())
+  const plan =
+    (await readSwap($, logDir, date)) ?? (await loadRoutine($, routine))[weekdayKey(await $.clock.now())]
   const next: Today = {
     date,
     exercise: plan?.exercise ?? 'reps',
@@ -83,7 +91,7 @@ const refreshHistory = async ($: $) => {
       return {
         date,
         count: await readCount($, `${logDir}/${date}`),
-        goal: routine[weekdayKey(ms)]?.goal ?? 0,
+        goal: ((await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)])?.goal ?? 0,
         isSkipped: await $.fs.exists(`${logDir}/${date}.skip`),
       }
     }),
@@ -201,7 +209,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'fit',
       description: "Log reps toward today's goal",
-      argumentHint: '[n | set n | reset | rest | score | program | rules | coach strict|easy | tour | hide]',
+      argumentHint: '[n | set n | reset | swap [exercise] | rest | score | program | rules | coach strict|easy | tour | hide]',
       immediate: true,
     })
     const stored = Number((await $.store.get('debt')) ?? 0)
@@ -237,6 +245,19 @@ export const register: Register = (on, options) => {
         const days = await refreshHistory($)
         await $.ui.open({ id: PANE, title: 'Claude Gym' })
         return { text: `🔥 ${streak(days)}-day streak · /fit score again to close` }
+      }
+      case 'swap': {
+        const before = await refreshToday($)
+        const { routine: routinePath, log: logDir } = await files($)
+        const routine = await loadRoutine($, routinePath)
+        const plan = pickSwap(routine, before.exercise, cmd.exercise)
+        if (plan === undefined) {
+          const names = [...new Set(Object.values(routine).map(p => p.exercise))].join(', ')
+          return { text: `No ${cmd.exercise} in your program. Pick one of: ${names}.` }
+        }
+        await $.fs.write(`${logDir}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
+        await refreshHistory($)
+        return { text: `Swapped to ${plan.exercise} today. ${line(await refreshToday($))}` }
       }
       case 'program':
         await openOnboarding($)
