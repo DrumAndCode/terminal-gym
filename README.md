@@ -14,25 +14,18 @@ A Claude Code mod for a daily bodyweight rep goal. When Claude runs a long turn,
 
 ## Install
 
-Requires Claude Code 2.1.288 or newer (mods are early access).
+Requires Claude Code 2.1.288 or newer.
 
 ```sh
-git clone https://github.com/DrumAndCode/terminal-gym.git ~/terminal-gym
+claude plugin marketplace add DrumAndCode/terminal-gym
+claude plugin install terminal-gym@terminal-gym
 ```
 
-Load it for one session:
+Or from inside a session: `/plugin install terminal-gym --marketplace DrumAndCode/terminal-gym`.
 
-```sh
-claude --plugin-dir ~/terminal-gym
-```
+Start a new session and the welcome band shows above your prompt. Update later with `claude plugin update terminal-gym@terminal-gym`.
 
-Or load it in every session by adding the folder to `~/.claude/settings.json`:
-
-```json
-{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/Users/you/terminal-gym" } }
-```
-
-Restart Claude Code (a new process, not a resumed chat), and the welcome band shows above your prompt.
+To hack on it, clone the repo and load it for one session with `claude --plugin-dir ./terminal-gym`.
 
 ## Commands
 
