@@ -13,9 +13,9 @@ const MONDAY_9AM = new Date(2026, 9, 5, 9).getTime()
 const world = (
   on: On,
   files = new Map<string, string>(),
-  { introduced = true, store = {} as Record<string, unknown> } = {},
+  { introduced = true, store = {} as Record<string, unknown>, now = MONDAY_9AM } = {},
 ) => {
-  const clock = mock.clock(on, { now: MONDAY_9AM })
+  const clock = mock.clock(on, { now })
   mock.store(on, { ...(introduced ? { introduced: true } : {}), ...store })
   mock.env(on, { HOME })
   const toasts: string[] = []
@@ -155,13 +155,7 @@ describe('nudges', () => {
     expect(submitted.drop).toBeUndefined()
   })
 
-
-
-
-
-
-
-  test('/fit rest clears the debt and marks the day', { options: { strict: true } }, async ($, on) => {
+  test('/fit rest marks the day and holds nothing', { options: { strict: true } }, async ($, on) => {
     const { files } = world(on)
     await start($)
     await send($)
@@ -507,7 +501,6 @@ test('below the wordmark width the band shows the bare name', async ($, on) => {
   await ui.unmount()
 })
 
-
 test('a rest day hides the rep buttons and offers a way back', async ($, on) => {
   world(on)
   await start($)
@@ -537,7 +530,7 @@ describe('rest days', () => {
     expect((await fit($, 'rest off')).text).toContain("Today isn't a rest day")
   })
 
-  test('no nudges or debt on a rest day', { options: { strict: true } }, async ($, on) => {
+  test('no nudges or held prompts on a rest day', { options: { strict: true } }, async ($, on) => {
     const { clock, toasts } = world(on)
     await start($)
     await fit($, 'rest')
@@ -548,11 +541,11 @@ describe('rest days', () => {
     expect(submitted.drop).toBeUndefined()
   })
 
-  test('debt left from earlier never holds prompts on a rest day', { options: { strict: true } }, async ($, on) => {
+  test('a rest day marked by hand holds nothing, even when behind', { options: { strict: true } }, async ($, on) => {
     const { files } = world(on)
     await start($)
     await send($)
-    // A rest day marked outside /fit rest (or before rest days cleared debt).
+    // A rest day marked outside /fit rest, after falling behind.
     files.set(`${LOG}/2026-10-05.skip`, '')
     await fit($, '')
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
@@ -566,7 +559,6 @@ describe('rest days', () => {
     expect((await fit($, 'rest')).text).toContain('Already a rest day')
   })
 })
-
 
 test('Pick your training opens the walkthrough before any other work', async ($, on) => {
   // The engine only counts an open as asked for while the press is still being
@@ -603,8 +595,6 @@ test('/clear and /resume run the setup again', async ($, on) => {
   expect(registered).toEqual(['fit', 'fit', 'fit'])
 })
 
-
-
 test('easy mode still waits for a long turn before nudging', async ($, on) => {
   const { clock, toasts } = world(on)
   await start($)
@@ -613,7 +603,6 @@ test('easy mode still waits for a long turn before nudging', async ($, on) => {
   await clock.advance(31_000)
   expect(toasts.some(t => t.includes('You next: 10 pushups'))).toBe(true)
 })
-
 
 describe('pace', () => {
   const HOUR = 60 * 60_000
@@ -711,4 +700,20 @@ describe('pace', () => {
     await start($)
     expect((await send($)).drop).toContain('10/100 due by now')
   })
+})
+
+test('a 00:30 prompt never starts the day, so 9am is not a wall of overdue sets', { options: { strict: true } }, async ($, on) => {
+  const { clock } = world(on, new Map(), { now: new Date(2026, 9, 5, 0, 30).getTime() })
+  await start($)
+  expect((await send($)).drop).toBeUndefined()
+  await clock.set(new Date(2026, 9, 5, 9, 0).getTime())
+  expect((await send($)).drop).toContain('(10/100 due by now)')
+})
+
+test('the shell script catching you up is seen by the gate', { options: { strict: true } }, async ($, on) => {
+  const { files } = world(on)
+  await start($)
+  expect((await send($)).drop).toContain('Behind pace')
+  files.set(`${LOG}/2026-10-05`, '10\n')
+  expect((await send($)).drop).toBeUndefined()
 })

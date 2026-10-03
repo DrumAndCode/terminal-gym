@@ -257,7 +257,8 @@ or press **+5 / +10 / +25** above the prompt
 
 ### Strict mode
 Off by default. When it's on:
-- today's goal is split into sets, spread over 8 hours from your first prompt
+- today's goal is split into sets, spread over 8 hours (by default) from your first prompt
+- prompts before 5am count as the night before
 - the first set is due right away
 - fall behind and your prompts wait until you catch up
 - a toast tells you when each set comes due

@@ -58,7 +58,7 @@
     "spinner": {
       "type": "boolean",
       "title": "Spinner takeover",
-      "description": "Replace the spinner word with the suggested set during long turns (strict mode: from the start of every turn you start).",
+      "description": "Replace the spinner word with the suggested set during long turns (easy mode).",
       "default": true
     },
     "band": {

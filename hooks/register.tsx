@@ -138,16 +138,23 @@ const dayStart = async ($: $, date: string) => {
   return stored?.date === date && typeof stored.at === 'number' ? stored.at : undefined
 }
 
+// Prompts before this hour belong to the night before: they never start the
+// day, or a 00:30 prompt would leave every set overdue by morning.
+const DAY_BEGINS_HOUR = 5
+
 const startDay = async ($: $) => {
-  const date = dayKey(await $.clock.now())
-  if ((await dayStart($, date)) === undefined) await $.store.set('dayStart', { date, at: await $.clock.now() })
+  const now = await $.clock.now()
+  if (new Date(now).getHours() < DAY_BEGINS_HOUR) return
+  const date = dayKey(now)
+  if ((await dayStart($, date)) === undefined) await $.store.set('dayStart', { date, at: now })
 }
 
 // Recomputes the pace and arms a timer for the next set coming due.
 const refreshPace = async ($: $): Promise<Pace | null> => {
   dueTimer?.cancel()
   dueTimer = undefined
-  const t = await read($, today)
+  // Re-read today: the date may have rolled over, or the shell script logged reps.
+  const t = await refreshToday($)
   const at = t === null ? undefined : await dayStart($, t.date)
   const now = await $.clock.now()
   const next: Pace | null =
@@ -263,6 +270,7 @@ const finishOnboarding = async ($: $) => {
   await markIntroduced($)
   await refreshToday($)
   await refreshHistory($)
+  await refreshPace($)
   await $.ui.close({ id: ONBOARD_PANE })
   const plan = routine ?? (JSON.parse(await $.fs.read(routinePath)) as Routine)
   toast($, `Program set: ${describeRoutine(plan)}. Get to work.`)
