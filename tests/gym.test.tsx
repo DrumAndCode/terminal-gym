@@ -59,11 +59,13 @@ const world = (
   })
   on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
   on('prompt.fill', () => ({ isFilled: true }))
-  on('prompt.submit', ($, e) => ({ text: e.text }))
+  // What sits beneath the mod: a settings hook may refuse the prompt.
+  const below = { refuse: undefined as string | undefined }
+  on('prompt.submit', ($, e) => (below.refuse === undefined ? { text: e.text } : { drop: below.refuse }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  return { clock, files, toasts, open, config, calls, registered }
+  return { clock, files, toasts, open, config, calls, registered, below }
 }
 
 const fit = ($: Engine, args: string) =>
@@ -721,4 +723,13 @@ test('easy mode still waits for a long turn before nudging', async ($, on) => {
   expect(toasts.some(t => t.includes('mid-set'))).toBe(false)
   await clock.advance(31_000)
   expect(toasts.some(t => t.includes('You next: 10 pushups'))).toBe(true)
+})
+
+test('a prompt refused further down costs nothing', { options: { strict: true } }, async ($, on) => {
+  const { below } = world(on)
+  await start($)
+  below.refuse = 'blocked by a settings hook'
+  expect((await send($)).drop).toBe('blocked by a settings hook')
+  below.refuse = undefined
+  expect((await send($)).drop).toBeUndefined()
 })

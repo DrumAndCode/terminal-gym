@@ -442,8 +442,10 @@ export const register: Register = (on, options) => {
     }
     // Only prompts the person typed cost reps: background tasks, loops and
     // other sessions start turns too, and those are not theirs to pay for.
-    if (isGated) await chargeTurn($, nudgeReps)
-    return next(e)
+    // Charged after next(e), so a prompt refused further down costs nothing.
+    const entered = await next(e)
+    if (isGated && entered.drop === undefined) await chargeTurn($, nudgeReps)
+    return entered
   })
 
   on('turn.start', async ($, e, next) => {
