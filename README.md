@@ -37,6 +37,7 @@ To hack on it, clone the repo and load it for one session with `claude --plugin-
 | `/fit reset` | today back to 0 |
 | `/fit swap [exercise]` | switch today's exercise (next in your program, or the one named) |
 | `/fit rest` | rest day (breaks streak, clears debt) |
+| `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
 | `/fit score` | streak + grid |
 | `/fit program` | pick your program |
 | `/fit strict` / `/fit easy` | strict mode on / off |

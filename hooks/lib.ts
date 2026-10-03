@@ -40,6 +40,7 @@ export type FitCommand =
   | { kind: 'status' }
   | { kind: 'week' }
   | { kind: 'skip' }
+  | { kind: 'unskip' }
   | { kind: 'help' }
   | { kind: 'hide' }
   | { kind: 'reset' }
@@ -51,13 +52,13 @@ export type FitCommand =
   | { kind: 'set'; n: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest | score | program | rules | strict | easy | tour | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | tour | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
   if (head === '' || head === 'status') return { kind: 'status' }
   if (head === 'score') return { kind: 'week' }
-  if (head === 'rest') return { kind: 'skip' }
+  if (head === 'rest') return value === 'off' ? { kind: 'unskip' } : { kind: 'skip' }
   if (head === 'program') return { kind: 'program' }
   if (head === 'swap') {
     // Names may be several words ("jumping jacks"): keep everything after "swap".
@@ -211,6 +212,7 @@ or press **+5 / +10 / +25** above the prompt
 | \`/fit reset\` | today back to 0 |
 | \`/fit swap\` | switch today's exercise |
 | \`/fit rest\` | rest day (breaks streak) |
+| \`/fit rest off\` | undo today's rest day |
 | \`/fit score\` | streak + grid |
 | \`/fit program\` | pick your training |
 | \`/fit strict\` / \`/fit easy\` | strict mode on / off |

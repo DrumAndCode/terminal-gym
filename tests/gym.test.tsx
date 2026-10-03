@@ -75,6 +75,8 @@ describe('lib', () => {
     expect(parseFit('strict')).toEqual({ kind: 'strict', isOn: true })
     expect(parseFit('easy')).toEqual({ kind: 'strict', isOn: false })
     expect(parseFit('reset')).toEqual({ kind: 'reset' })
+    expect(parseFit('rest')).toEqual({ kind: 'skip' })
+    expect(parseFit('rest off')).toEqual({ kind: 'unskip' })
     expect(parseFit('tour')).toEqual({ kind: 'intro' })
     expect(parseFit('coach strict').kind).toBe('error')
   })
@@ -151,15 +153,16 @@ describe('nudges', () => {
   })
 
   test('any payment buys two minutes of prompts, then the rest is due', { options: { strict: true } }, async ($, on) => {
-    const { clock } = world(on)
+    const { clock, toasts } = world(on)
     await start($)
     await $.turn.start({ text: 'go', turnId: 't1' })
     await clock.advance(31_000)
     await $.turn.start({ text: 'go', turnId: 't2' })
     await clock.advance(31_000)
+    expect(toasts).toContain("Your agent's mid-set. +10 pushups added · debt 20 left.")
 
     const reply = await fit($, '5')
-    expect(reply.text).toContain('owe 15 · next prompt + 2 min unlocked')
+    expect(reply.text).toContain('debt 15 left · next prompt + 2 min unlocked')
     const paid = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
     expect(paid.drop).toBeUndefined()
 
@@ -210,7 +213,7 @@ describe('nudges', () => {
     await clock.advance(119_000)
     expect(toasts.some(t => t.includes("Break's over"))).toBe(false)
     await clock.advance(2_000)
-    expect(toasts.some(t => t.includes("Break's over. You owe 6 pushups"))).toBe(true)
+    expect(toasts.some(t => t.includes("Break's over. Debt 6 pushups left"))).toBe(true)
   })
 
   test('without debt, the break toast asks for the next set', async ($, on) => {
@@ -569,14 +572,75 @@ test('below the wordmark width the band shows the bare name', async ($, on) => {
   await ui.unmount()
 })
 
-test('a rest day draws the tracker dim, not red', async ($, on) => {
+test('the band labels debt as what is left and says if prompts are open', { options: { strict: true } }, async ($, on) => {
+  const { clock } = world(on)
+  await start($)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await clock.advance(31_000)
+  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: /debt 10 left · pay to unlock/ })).toBeDefined()
+  await ui.press({ key: 'add5' })
+  expect(await ui.find({ type: 'Text', text: /debt 5 left · prompts open/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /owe/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a rest day hides the rep buttons and offers a way back', async ($, on) => {
   world(on)
   await start($)
-  await fit($, '20') // 20/100 would draw red on a normal day
+  await fit($, '20')
   await fit($, 'rest')
   const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
-  const tracker = await ui.find({ type: 'Text', text: /20\/100 pushups/ })
-  expect(tracker?.props.color).toBeUndefined()
-  expect(tracker?.props.dimColor).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /Rest day · pushups back tomorrow/ })).toBeDefined()
+  expect(await ui.find({ key: 'add5' })).toBeUndefined()
+  await ui.press({ key: 'train' })
   await ui.unmount()
+
+  const back = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+  expect(await back.find({ key: 'add5' })).toBeDefined()
+  await back.unmount()
+})
+
+describe('rest days', () => {
+  test('/fit rest off undoes the rest day and reps count again', async ($, on) => {
+    const { files } = world(on)
+    await start($)
+    await fit($, 'rest')
+    expect((await fit($, '10')).text).toContain("Today's a rest day")
+    expect(files.get(`${LOG}/2026-10-05`)).toBeUndefined()
+
+    expect((await fit($, 'rest off')).text).toContain('Rest day undone')
+    expect((await fit($, '10')).text).toContain('10/100 pushups')
+    expect((await fit($, 'rest off')).text).toContain("Today isn't a rest day")
+  })
+
+  test('no nudges or debt on a rest day', { options: { strict: true } }, async ($, on) => {
+    const { clock, toasts } = world(on)
+    await start($)
+    await fit($, 'rest')
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(31_000)
+    expect(toasts.some(t => t.includes('mid-set'))).toBe(false)
+    const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(submitted.drop).toBeUndefined()
+  })
+
+  test('debt left from earlier never holds prompts on a rest day', { options: { strict: true } }, async ($, on) => {
+    const { clock, files } = world(on)
+    await start($)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(31_000)
+    // A rest day marked outside /fit rest (or before rest days cleared debt).
+    files.set(`${LOG}/2026-10-05.skip`, '')
+    await fit($, '')
+    const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(submitted.drop).toBeUndefined()
+  })
+
+  test('/fit rest twice says it already is one', async ($, on) => {
+    world(on)
+    await start($)
+    await fit($, 'rest')
+    expect((await fit($, 'rest')).text).toContain('Already a rest day')
+  })
 })

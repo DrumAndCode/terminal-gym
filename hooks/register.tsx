@@ -41,6 +41,7 @@ let breakTimer: { cancel: () => void } | undefined
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
 const debt = atom({ plugin: 'terminal-gym', key: 'debt' } as const, 0)
+const isUnlocked = atom({ plugin: 'terminal-gym', key: 'isUnlocked' } as const, false)
 const isWaiting = atom({ plugin: 'terminal-gym', key: 'isWaiting' } as const, false)
 const history = atom({ plugin: 'terminal-gym', key: 'history' } as const, [])
 const isIntroduced = atom({ plugin: 'terminal-gym', key: 'isIntroduced' } as const, false)
@@ -86,6 +87,10 @@ const readSwap = async ($: $, logDir: string, date: string): Promise<Routine[str
   }
 }
 
+// `/fit rest` leaves `<date>.skip`; `/fit rest off` writes "off" into it to undo.
+const readRest = async ($: $, path: string) =>
+  (await $.fs.exists(path)) && (await $.fs.read(path)).trim() !== 'off'
+
 const refreshToday = async ($: $): Promise<Today> => {
   const { routine, log: logDir } = await files($)
   const date = dayKey(await $.clock.now())
@@ -97,6 +102,7 @@ const refreshToday = async ($: $): Promise<Today> => {
     goal: plan?.goal ?? 0,
     unit: plan?.unit ?? '',
     count: await readCount($, `${logDir}/${date}`),
+    isRest: await readRest($, `${logDir}/${date}.skip`),
   }
   await update($, today, () => next)
   return next
@@ -112,7 +118,7 @@ const refreshHistory = async ($: $) => {
         date,
         count: await readCount($, `${logDir}/${date}`),
         goal: ((await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)])?.goal ?? 0,
-        isSkipped: await $.fs.exists(`${logDir}/${date}.skip`),
+        isSkipped: await readRest($, `${logDir}/${date}.skip`),
       }
     }),
   )
@@ -125,6 +131,17 @@ const setDebt = async ($: $, n: number) => {
   // A pass only covers debt that's still owed; never carry one into the next debt.
   if (n === 0) await $.store.set('hasPass', false)
   await update($, debt, () => n)
+  await syncUnlocked($)
+}
+
+// Whether paid reps currently let prompts through: an unused pass, or inside the break.
+const syncUnlocked = async ($: $) => {
+  const owed = await read($, debt)
+  const paidAt = Number((await $.store.get('paidAt')) ?? 0)
+  const hasPass = (await $.store.get('hasPass')) === true
+  const isOpen = owed > 0 && (hasPass || (await $.clock.now()) - paidAt < GRACE_MS)
+  await update($, isUnlocked, () => isOpen)
+  return isOpen
 }
 
 const line = (t: Today) => {
@@ -136,7 +153,7 @@ const line = (t: Today) => {
 const paidNote = (owedBefore: number, owedAfter: number) => {
   if (owedAfter >= owedBefore) return ''
   if (owedAfter === 0) return ' · debt paid'
-  return ` · owe ${owedAfter} · next prompt + 2 min unlocked`
+  return ` · debt ${owedAfter} left · next prompt + 2 min unlocked`
 }
 
 const withStreak = (t: Today, days: readonly Day[]) => {
@@ -166,6 +183,7 @@ const logReps = async ($: $, change: (count: number) => number) => {
     await setDebt($, left)
     await $.store.set('paidAt', await $.clock.now())
     if (left > 0) await $.store.set('hasPass', true)
+    await syncUnlocked($)
   }
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
@@ -176,10 +194,12 @@ const logReps = async ($: $, change: (count: number) => number) => {
 // Fires two minutes after the last logged set.
 const breakOver = async ($: $) => {
   breakTimer = undefined
+  await syncUnlocked($)
   const t = await read($, today)
+  if (t?.isRest === true) return
   const owed = await read($, debt)
   if (owed > 0) {
-    toast($, `⏱ Break's over. You owe ${owed} ${t?.exercise ?? 'reps'}; prompts wait for your next set.`)
+    toast($, `⏱ Break's over. Debt ${owed} ${t?.exercise ?? 'reps'} left; prompts wait for your next set.`)
   } else if (t !== null && t.goal > 0 && t.count < t.goal) {
     toast($, `⏱ Break's over. Next set? ${t.count}/${t.goal}${t.unit} ${t.exercise}.`)
   }
@@ -187,15 +207,24 @@ const breakOver = async ($: $) => {
 
 const nudge = async ($: $, reps: number, isStrict: boolean) => {
   const t = await read($, today)
-  if (t === null || (t.goal > 0 && t.count >= t.goal)) return
+  if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
   await update($, isWaiting, () => true)
   if (isStrict) {
     const owed = (await read($, debt)) + reps
     await setDebt($, owed)
-    toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}. You owe ${owed}.`)
+    toast($, `Your agent's mid-set. +${reps} ${t.exercise} added · debt ${owed} left.`)
   } else {
     toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
   }
+}
+
+const endRest = async ($: $) => {
+  const t = await refreshToday($)
+  if (!t.isRest) return { text: `Today isn't a rest day. ${line(t)}` }
+  await $.fs.write(`${(await files($)).log}/${t.date}.skip`, 'off\n')
+  const back = await refreshToday($)
+  await refreshHistory($)
+  return { text: `Rest day undone. Back to work. ${line(back)}` }
 }
 
 const markIntroduced = async ($: $) => {
@@ -260,11 +289,12 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'fit',
       description: "Log reps toward today's goal",
-      argumentHint: '[n | set n | reset | swap [exercise] | rest | score | program | rules | strict | easy | tour | hide]',
+      argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | tour | hide]',
       immediate: true,
     })
     const stored = Number((await $.store.get('debt')) ?? 0)
     await update($, debt, () => (isStrict ? stored : 0))
+    await syncUnlocked($)
     const introduced = (await $.store.get('introduced')) === true
     await update($, isIntroduced, () => introduced)
     await refreshToday($)
@@ -279,6 +309,7 @@ export const register: Register = (on, options) => {
         return { text: cmd.text }
       case 'add':
       case 'set': {
+        if ((await refreshToday($)).isRest) return { text: "Today's a rest day. /fit rest off to train." }
         const owedBefore = await read($, debt)
         const n = cmd.n
         const t = await logReps($, count => (cmd.kind === 'add' ? count + n : n))
@@ -286,13 +317,17 @@ export const register: Register = (on, options) => {
       }
       case 'skip': {
         const t = await refreshToday($)
+        if (t.isRest) return { text: 'Already a rest day. /fit rest off to train.' }
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
         await setDebt($, 0)
         breakTimer?.cancel()
         breakTimer = undefined
+        await refreshToday($)
         await refreshHistory($)
-        return { text: `Rest day logged. Streak resets, debt cleared. Back at it tomorrow.` }
+        return { text: `Rest day logged. Streak resets, debt cleared. Back at it tomorrow. (/fit rest off to undo)` }
       }
+      case 'unskip':
+        return endRest($)
       case 'week': {
         if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
           await $.ui.close({ id: PANE })
@@ -349,7 +384,7 @@ export const register: Register = (on, options) => {
         const t = await refreshToday($)
         const owed = await read($, debt)
         const shown = withStreak(t, await refreshHistory($))
-        return { text: owed > 0 ? `${shown} · owe ${owed}` : shown }
+        return { text: owed > 0 ? `${shown} · debt ${owed} left` : shown }
       }
     }
   })
@@ -357,18 +392,22 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const isGated = isStrict && e.origin.kind === 'composer' && !e.text.trimStart().startsWith('/')
     const owed = isGated ? await read($, debt) : 0
+    const t = await read($, today)
+    // Rest days owe nothing; clear anything left from earlier in the day.
+    if (owed > 0 && t?.isRest === true) {
+      await setDebt($, 0)
+      return next(e)
+    }
     if (owed > 0) {
       // Any paid reps unlock the next prompt, plus every prompt for two minutes after.
-      const paidAt = Number((await $.store.get('paidAt')) ?? 0)
-      const hasPass = (await $.store.get('hasPass')) === true
-      if (!hasPass && (await $.clock.now()) - paidAt >= GRACE_MS) {
-        const t = await read($, today)
+      if (!(await syncUnlocked($))) {
         void $.prompt.fill({ text: e.text })
         return {
           drop: `Pay up first: ${owed} ${t?.exercise ?? 'reps'}. Log any reps (/fit 5) to unlock your next prompt + 2 min. /fit rest skips the day (breaks streak).`,
         }
       }
       await $.store.set('hasPass', false)
+      await syncUnlocked($)
     }
     return next(e)
   })
@@ -449,13 +488,27 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // A rest day is deliberate, not a miss: no rep buttons, just a way back.
+    if (t.isRest) {
+      const REST = `😴 Rest day · ${t.exercise} back tomorrow`
+      const TRAIN = 'Train today'
+      return (
+        <Box key="rest" flexDirection={cols >= cells(REST) + 2 + buttonsWidth([TRAIN]) ? 'row' : 'column'}>
+          <Text dimColor wrap="truncate-end">
+            {REST}
+            {'  '}
+          </Text>
+          <Button key="train" label={TRAIN} onPress={() => void endRest($)} />
+        </Box>
+      )
+    }
+
     const owed = await read($, debt)
     const days = await read($, history)
-    // A rest day is deliberate, not a miss: draw it dim, not red.
-    const isRestDay = days.find(day => day.date === t.date)?.isSkipped === true
-    const color = isRestDay ? undefined : progressColor(t.count, t.goal)
+    const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
-    const progress = `${line(t)}${owed > 0 ? `  owe ${owed}` : ''}`
+    const debtText = owed > 0 ? `  debt ${owed} left · ${(await read($, isUnlocked)) ? 'prompts open' : 'pay to unlock'}` : ''
+    const progress = `${line(t)}${debtText}`
     const run = streak(days)
     const streakText = run > 0 ? `  🔥${run}d` : ''
     const LOG_LABEL = 'log reps: '
@@ -646,7 +699,7 @@ export const register: Register = (on, options) => {
     const routine = pickedRoutine(p)
     const exercise = routine?.mon?.exercise ?? (await read($, today))?.exercise ?? 'pushups'
     const sample = withStreak(
-      { date: '', exercise, goal: 100, unit: '', count: 60 },
+      { date: '', exercise, goal: 100, unit: '', count: 60, isRest: false },
       // three finished days, today still in progress: 🔥3d
       [
         ...Array.from({ length: 3 }, (_, i) => ({ date: `d${i}`, count: 100, goal: 100, isSkipped: false })),
