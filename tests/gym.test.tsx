@@ -94,6 +94,7 @@ describe('setup helpers', () => {
     expect(progressColor(20, 100)).toBe('#d75f5f')
     expect(progressColor(40, 100)).toBe('#d7af5f')
     expect(progressColor(100, 100)).toBe('#87af87')
+    expect(progressColor(5, 0)).toBeUndefined()
   })
 })
 
@@ -487,5 +488,16 @@ test('below the wordmark width the band shows the bare name', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns: 16 } })
   expect(await ui.find({ type: 'Text', text: '█═' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'TERMINAL-GYM' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a rest day draws the tracker dim, not red', async ($, on) => {
+  world(on)
+  await start($)
+  await fit($, 'rest')
+  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+  const tracker = await ui.find({ type: 'Text', text: /0\/100 pushups/ })
+  expect(tracker?.props.color).toBeUndefined()
+  expect(tracker?.props.dimColor).toBe(true)
   await ui.unmount()
 })

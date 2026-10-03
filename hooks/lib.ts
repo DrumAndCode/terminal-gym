@@ -130,8 +130,9 @@ export const heatCells = (history: readonly Day[]) => {
 }
 
 // Muted traffic light: red under a third of the goal, yellow on the way, green done.
+// No goal means no judgement: undefined draws dim.
 export const progressColor = (count: number, goal: number) =>
-  goal > 0 && count >= goal ? '#87af87' : goal > 0 && count / goal >= 1 / 3 ? '#d7af5f' : '#d75f5f'
+  goal <= 0 ? undefined : count >= goal ? '#87af87' : count / goal >= 1 / 3 ? '#d7af5f' : '#d75f5f'
 
 export const daily = (exercise: string, goal: number): Routine =>
   Object.fromEntries(WEEKDAYS.map(day => [day, { exercise, goal }]))

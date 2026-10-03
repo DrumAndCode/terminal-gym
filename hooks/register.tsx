@@ -402,14 +402,16 @@ export const register: Register = (on, options) => {
 
     const owed = await read($, debt)
     const days = await read($, history)
-    const color = progressColor(t.count, t.goal)
+    // A rest day is deliberate, not a miss: draw it dim, not red.
+    const isRestDay = days.find(day => day.date === t.date)?.isSkipped === true
+    const color = isRestDay ? undefined : progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
     const progress = `${withStreak(t, days)}${owed > 0 ? `  owe ${owed}` : ''}`
     const logWidth = cells('log ') + buttonsWidth(['+5', '+10', '+25'])
 
     return (
       <Box key="tracker" flexDirection={cols >= cells(progress) + 1 + logWidth ? 'row' : 'column'}>
-        <Text color={color} wrap="truncate-end">
+        <Text color={color} dimColor={color === undefined} wrap="truncate-end">
           {progress}{' '}
         </Text>
         <Box>
