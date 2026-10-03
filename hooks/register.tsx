@@ -9,6 +9,8 @@ import {
   ROUTINES,
   SIZES,
   bar,
+  buttonsWidth,
+  cells,
   dayKey,
   describeRoutine,
   heatCells,
@@ -355,11 +357,12 @@ export const register: Register = (on, options) => {
     const cols = e.props.bodyColumns
     const WORDMARK = '▓ TERMINAL GYM ▓'
     const TAGLINE = 'Your agent put in the reps. You next.'
-    const BUTTONS_WIDTH = 53
+    const BUTTONS_WIDTH = buttonsWidth(['Pick your training', 'House rules', 'Just train'])
+    const HEADER_WIDTH = cells(WORDMARK) + 2 + cells(TAGLINE)
 
     if (!(await read($, isIntroduced))) {
       const buttons = (
-        <Box flexDirection={cols >= BUTTONS_WIDTH ? 'row' : 'column'}>
+        <Box key="buttons" flexDirection={cols >= BUTTONS_WIDTH ? 'row' : 'column'}>
           <Button key="setup" label="Pick your training" variant="primary" onPress={() => void openOnboarding($)} />
           {cols >= BUTTONS_WIDTH && <Text> </Text>}
           <Button key="help" label="House rules" onPress={() => void $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })} />
@@ -368,15 +371,16 @@ export const register: Register = (on, options) => {
         </Box>
       )
       const header = (
-        <Box flexDirection={cols >= WORDMARK.length + TAGLINE.length + 2 ? 'row' : 'column'}>
+        <Box key="header" flexDirection={cols >= HEADER_WIDTH ? 'row' : 'column'}>
           <Text bold wrap="truncate-end">{WORDMARK}  </Text>
-          <Text dimColor wrap="truncate-end">{TAGLINE} </Text>
+          <Text dimColor wrap="truncate-end">{TAGLINE}</Text>
         </Box>
       )
-      const isOneLine = cols >= WORDMARK.length + TAGLINE.length + BUTTONS_WIDTH + 3
+      const isOneLine = cols >= HEADER_WIDTH + 1 + BUTTONS_WIDTH
       return (
-        <Box flexDirection={isOneLine ? 'row' : 'column'}>
+        <Box key="band" flexDirection={isOneLine ? 'row' : 'column'}>
           {header}
+          {isOneLine && <Text> </Text>}
           {buttons}
         </Box>
       )
@@ -387,10 +391,10 @@ export const register: Register = (on, options) => {
     const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
     const progress = `${withStreak(t, days)}${owed > 0 ? `  owe ${owed}` : ''}`
-    const LOG_WIDTH = 27
+    const logWidth = cells('log ') + buttonsWidth(['+5', '+10', '+25'])
 
     return (
-      <Box flexDirection={cols >= progress.length + LOG_WIDTH + 1 ? 'row' : 'column'}>
+      <Box key="tracker" flexDirection={cols >= cells(progress) + 1 + logWidth ? 'row' : 'column'}>
         <Text color={color} dimColor={color === undefined} wrap="truncate-end">
           {progress}{' '}
         </Text>

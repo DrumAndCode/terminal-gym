@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseCustom, parseFit, pickSwap, progressColor, scale, streak } from '../hooks/lib'
+import { buttonsWidth, cells, parseCustom, parseFit, pickSwap, progressColor, scale, streak } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -447,4 +447,26 @@ test('the bands stack instead of squeezing on narrow terminals', async ($, on) =
   await narrow.press({ key: 'add10' })
   expect(files.get(`${LOG}/2026-10-05`)).toBe('10\n')
   await narrow.unmount()
+})
+
+test('band widths follow the labels', async () => {
+  expect(buttonsWidth(['Pick your training', 'House rules', 'Just train'])).toBe(53)
+  expect(buttonsWidth(['+5', '+10', '+25'])).toBe(22)
+  expect(cells('✅ 💪 🔥')).toBe(8)
+})
+
+test('the welcome band changes layout with width', async ($, on) => {
+  world(on, new Map(), { introduced: false })
+  await start($)
+  const layout = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns } })
+    const dirs = await Promise.all(['band', 'header', 'buttons'].map(async key => (await ui.find({ key }))?.props.flexDirection))
+    await ui.unmount()
+    return dirs
+  }
+  expect(await layout(109)).toEqual(['row', 'row', 'row'])
+  expect(await layout(108)).toEqual(['column', 'row', 'row'])
+  expect(await layout(55)).toEqual(['column', 'row', 'row'])
+  expect(await layout(54)).toEqual(['column', 'column', 'row'])
+  expect(await layout(52)).toEqual(['column', 'column', 'column'])
 })

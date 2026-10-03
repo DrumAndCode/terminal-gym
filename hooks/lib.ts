@@ -178,6 +178,14 @@ export const BARBELL = {
   width: 34,
 } as const
 
+// Terminal cells a string takes: emoji draw two cells wide.
+export const cells = (text: string) =>
+  [...text].reduce((w, ch) => w + ((ch.codePointAt(0) ?? 0) >= 0x1f000 || ch === '✅' ? 2 : 1), 0)
+
+// The terminal draws a Button as `[ label ]`, and a row puts one cell between buttons.
+export const buttonsWidth = (labels: readonly string[]) =>
+  labels.reduce((w, label) => w + cells(label) + 4, 0) + labels.length - 1
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
