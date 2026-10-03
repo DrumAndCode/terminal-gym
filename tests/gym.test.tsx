@@ -86,7 +86,7 @@ describe('lib', () => {
     expect(parseFit('reset')).toEqual({ kind: 'reset' })
     expect(parseFit('rest')).toEqual({ kind: 'skip' })
     expect(parseFit('rest off')).toEqual({ kind: 'unskip' })
-    expect(parseFit('tour')).toEqual({ kind: 'intro' })
+    expect(parseFit('start')).toEqual({ kind: 'intro' })
     expect(parseFit('coach strict').kind).toBe('error')
   })
 
@@ -431,10 +431,10 @@ describe('walkthrough', () => {
   })
 })
 
-test('/fit tour brings the welcome band back', async ($, on) => {
+test('/fit start brings the welcome band back', async ($, on) => {
   world(on)
   await start($)
-  await fit($, 'tour')
+  await fit($, 'start')
   const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /You next/ })).toBeDefined()
   await ui.unmount()
