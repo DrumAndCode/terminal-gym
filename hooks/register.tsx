@@ -114,10 +114,12 @@ const refreshHistory = async ($: $) => {
   const days: Day[] = await Promise.all(
     lastDays(await $.clock.now(), HISTORY_DAYS).map(async ms => {
       const date = dayKey(ms)
+      const plan = (await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)]
       return {
         date,
         count: await readCount($, `${logDir}/${date}`),
-        goal: ((await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)])?.goal ?? 0,
+        goal: plan?.goal ?? 0,
+        exercise: plan?.exercise ?? 'reps',
         isSkipped: await readRest($, `${logDir}/${date}.skip`),
       }
     }),
@@ -280,6 +282,7 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
   date: `sample-${i}`,
   count: Math.round(share * 100),
   goal: 100,
+  exercise: 'pushups',
   isSkipped: false,
 }))
 
@@ -569,9 +572,12 @@ export const register: Register = (on, options) => {
         <Text bold>{BARBELL.name}</Text>
       )
 
-    const summary = week.map(day => {
+    // Counts padded to one width so the exercise names line up.
+    const counts = week.map(day => `${day.count}/${day.goal}`)
+    const countWidth = Math.max(0, ...counts.map(count => count.length))
+    const summary = week.map((day, i) => {
       const mark = day.isSkipped ? '–' : day.goal > 0 && day.count >= day.goal ? '✓' : '·'
-      return `${mark} ${day.date.slice(5)}  ${day.count}/${day.goal}`
+      return `${mark} ${day.date.slice(5)}  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}`
     })
 
     if (e.surface === 'terminal') {
@@ -712,8 +718,8 @@ export const register: Register = (on, options) => {
       { date: '', exercise, goal: 100, unit: '', count: 60, isRest: false },
       // three finished days, today still in progress: 🔥3d
       [
-        ...Array.from({ length: 3 }, (_, i) => ({ date: `d${i}`, count: 100, goal: 100, isSkipped: false })),
-        { date: 'today', count: 60, goal: 100, isSkipped: false },
+        ...Array.from({ length: 3 }, (_, i) => ({ date: `d${i}`, count: 100, goal: 100, exercise, isSkipped: false })),
+        { date: 'today', count: 60, goal: 100, exercise, isSkipped: false },
       ],
     )
     const preview =

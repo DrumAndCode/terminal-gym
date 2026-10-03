@@ -91,7 +91,7 @@ describe('lib', () => {
   })
 
   test('streak counts finished days and forgives an unfinished today', async () => {
-    const day = (count: number, isSkipped = false) => ({ date: 'd', count, goal: 100, isSkipped })
+    const day = (count: number, isSkipped = false) => ({ date: 'd', count, goal: 100, exercise: 'dips', isSkipped })
     expect(streak([day(0), day(100), day(120), day(40)])).toBe(2)
     expect(streak([day(100), day(100, true), day(100)])).toBe(1)
   })
@@ -672,5 +672,15 @@ test('Pick your training opens the walkthrough before any other work', async ($,
   calls.length = 0
   await ui.press({ key: 'setup' })
   expect(calls[0]).toBe('ui.open:gym-onboard')
+  await ui.unmount()
+})
+
+test('score rows name each day\'s exercise', async ($, on) => {
+  world(on, new Map([[`${LOG}/2026-10-03`, '300\n'], [`${LOG}/2026-10-05`, '15\n']]))
+  await start($)
+  await fit($, 'score')
+  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /10-03  300\/300  squats/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /10-05  15\/100   pushups/ })).toBeDefined()
   await ui.unmount()
 })
