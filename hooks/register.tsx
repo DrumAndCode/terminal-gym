@@ -30,7 +30,7 @@ import {
 } from './lib'
 import type { Routine } from './lib'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const PANE = 'gym-week'
 const HELP_PANE = 'gym-help'
@@ -40,7 +40,7 @@ const TOAST_MS = 10_000
 const HOUR_MS = 60 * 60_000
 
 // Toasts stay up long enough to read mid-set.
-const toast = ($: $, text: string) => $.ui.toast(text, { timeoutMs: TOAST_MS })
+const toast = ($: Engine, text: string) => $.ui.toast(text, { timeoutMs: TOAST_MS })
 
 // The pace settings, set from the options each time the module registers.
 const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
@@ -60,12 +60,12 @@ const onboardPick = atom({ plugin: 'terminal-gym', key: 'onboardPick' } as const
 })
 
 // Same files as the `fit` shell script, so both agree.
-const files = async ($: $) => {
+const files = async ($: Engine) => {
   const dir = `${(await $.env.get('HOME')) ?? ''}/.claude/fitness`
   return { routine: `${dir}/routine.json`, log: `${dir}/log` }
 }
 
-const loadRoutine = async ($: $, routinePath: string): Promise<Routine> => {
+const loadRoutine = async ($: Engine, routinePath: string): Promise<Routine> => {
   if (!(await $.fs.exists(routinePath))) {
     await $.fs.write(routinePath, `${JSON.stringify(DEFAULT_ROUTINE, null, 2)}\n`)
     return DEFAULT_ROUTINE
@@ -73,14 +73,14 @@ const loadRoutine = async ($: $, routinePath: string): Promise<Routine> => {
   return JSON.parse(await $.fs.read(routinePath)) as Routine
 }
 
-const readCount = async ($: $, path: string) => {
+const readCount = async ($: Engine, path: string) => {
   if (!(await $.fs.exists(path))) return 0
   const n = parseInt(await $.fs.read(path), 10)
   return Number.isFinite(n) ? n : 0
 }
 
 // `/fit swap` leaves the day's plan beside its count as `<date>.swap`.
-const readSwap = async ($: $, logDir: string, date: string): Promise<Routine[string] | undefined> => {
+const readSwap = async ($: Engine, logDir: string, date: string): Promise<Routine[string] | undefined> => {
   const path = `${logDir}/${date}.swap`
   if (!(await $.fs.exists(path))) return undefined
   // A damaged or odd file falls back to the routine instead of breaking every refresh.
@@ -95,10 +95,10 @@ const readSwap = async ($: $, logDir: string, date: string): Promise<Routine[str
 }
 
 // `/fit rest` leaves `<date>.skip`; `/fit rest off` writes "off" into it to undo.
-const readRest = async ($: $, path: string) =>
+const readRest = async ($: Engine, path: string) =>
   (await $.fs.exists(path)) && (await $.fs.read(path)).trim() !== 'off'
 
-const refreshToday = async ($: $): Promise<Today> => {
+const refreshToday = async ($: Engine): Promise<Today> => {
   const { routine, log: logDir } = await files($)
   const date = dayKey(await $.clock.now())
   const plan =
@@ -117,7 +117,7 @@ const refreshToday = async ($: $): Promise<Today> => {
 
 const DAY_MS = 86_400_000
 
-const readDay = async ($: $, routine: Routine, logDir: string, ms: number): Promise<Day> => {
+const readDay = async ($: Engine, routine: Routine, logDir: string, ms: number): Promise<Day> => {
   const date = dayKey(ms)
   const plan = (await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)]
   return {
@@ -131,7 +131,7 @@ const readDay = async ($: $, routine: Routine, logDir: string, ms: number): Prom
 
 // Finished days in a row just before the window, so a streak can outlast it.
 // Cached per window: a full walk once, then one day's step as the window slides.
-const olderRun = async ($: $, days: readonly Day[], routine: Routine, logDir: string) => {
+const olderRun = async ($: Engine, days: readonly Day[], routine: Routine, logDir: string) => {
   const first = days[0]
   if (first === undefined || !isDone(first)) {
     await $.store.delete('streakCache')
@@ -157,7 +157,7 @@ const olderRun = async ($: $, days: readonly Day[], routine: Routine, logDir: st
   return older
 }
 
-const refreshHistory = async ($: $) => {
+const refreshHistory = async ($: Engine) => {
   const { routine: routinePath, log: logDir } = await files($)
   const routine = await loadRoutine($, routinePath)
   const days: Day[] = await Promise.all(
@@ -180,7 +180,7 @@ const refreshHistory = async ($: $) => {
 }
 
 // The day starts at the person's first prompt; sets are spread from there.
-const dayStart = async ($: $, date: string) => {
+const dayStart = async ($: Engine, date: string) => {
   const stored = (await $.store.get('dayStart')) as { date?: string; at?: number } | undefined
   return stored?.date === date && typeof stored.at === 'number' ? stored.at : undefined
 }
@@ -189,7 +189,7 @@ const dayStart = async ($: $, date: string) => {
 // day, or a 00:30 prompt would leave every set overdue by morning.
 const DAY_BEGINS_HOUR = 5
 
-const startDay = async ($: $) => {
+const startDay = async ($: Engine) => {
   const now = await $.clock.now()
   if (new Date(now).getHours() < DAY_BEGINS_HOUR) return
   const date = dayKey(now)
@@ -197,7 +197,7 @@ const startDay = async ($: $) => {
 }
 
 // Recomputes the pace and arms a timer for the next set coming due.
-const refreshPace = async ($: $): Promise<Pace | null> => {
+const refreshPace = async ($: Engine): Promise<Pace | null> => {
   dueTimer?.cancel()
   dueTimer = undefined
   // Re-read today: the date may have rolled over, or the shell script logged reps.
@@ -215,7 +215,7 @@ const refreshPace = async ($: $): Promise<Pace | null> => {
   return next
 }
 
-const setDue = async ($: $) => {
+const setDue = async ($: Engine) => {
   const p = await refreshPace($)
   const t = await read($, today)
   if (p === null || t === null || p.behind <= 0) return
@@ -223,7 +223,7 @@ const setDue = async ($: $) => {
 }
 
 // A Close button's press: a refused close says why instead of doing nothing.
-const closePane = async ($: $, id: string) => {
+const closePane = async ($: Engine, id: string) => {
   try {
     await $.ui.close({ id })
   } catch (err) {
@@ -247,7 +247,7 @@ const withStreak = (t: Today, days: readonly Day[], older = 0) => {
   return run > 0 ? `${line(t)}  🔥${run}d` : line(t)
 }
 
-const logReps = async ($: $, change: (count: number) => number) => {
+const logReps = async ($: Engine, change: (count: number) => number) => {
   const before = await refreshToday($)
   const count = Math.max(0, change(before.count))
   await $.fs.write(`${(await files($)).log}/${before.date}`, `${count}\n`)
@@ -266,14 +266,14 @@ const logReps = async ($: $, change: (count: number) => number) => {
 }
 
 // Easy mode: a suggestion once a turn runs long.
-const nudge = async ($: $, reps: number) => {
+const nudge = async ($: Engine, reps: number) => {
   const t = await read($, today)
   if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
   await update($, isWaiting, () => true)
   toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
 }
 
-const endRest = async ($: $) => {
+const endRest = async ($: Engine) => {
   const t = await refreshToday($)
   if (!t.isRest) return { text: `Today isn't a rest day. ${line(t)}` }
   await $.fs.write(`${(await files($)).log}/${t.date}.skip`, 'off\n')
@@ -283,7 +283,7 @@ const endRest = async ($: $) => {
   return { text: `Rest day undone. Back to work. ${line(back)}` }
 }
 
-const markIntroduced = async ($: $) => {
+const markIntroduced = async ($: Engine) => {
   await $.store.set('introduced', true)
   await update($, isIntroduced, () => true)
 }
@@ -291,7 +291,7 @@ const markIntroduced = async ($: $) => {
 const KEEP = 'Keep my current routine'
 const DEFAULT_PROGRAM = 'Push · dip · squat rotation'
 
-const openOnboarding = async ($: $) => {
+const openOnboarding = async ($: Engine) => {
   // Open first: a pane counts as asked for only while the press or command that
   // asked is still being answered. Opened after other awaits, the engine treats
   // it as unasked and leaves it undrawn below 144 columns.
@@ -315,7 +315,7 @@ const pickedRoutine = (p: OnboardPick): Routine | undefined => {
   return preset === undefined ? undefined : scale(preset, SIZES[p.size as keyof typeof SIZES] ?? 1)
 }
 
-const finishOnboarding = async ($: $) => {
+const finishOnboarding = async ($: Engine) => {
   const p = await read($, onboardPick)
   const { routine: routinePath } = await files($)
   const routine = pickedRoutine(p)
@@ -342,7 +342,7 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
 }))
 
 // Everything a conversation needs: the /fit command and today's state.
-const boot = async ($: $) => {
+const boot = async ($: Engine) => {
   const introduced = (await $.store.get('introduced')) === true
   await update($, isIntroduced, () => introduced)
   await refreshToday($)

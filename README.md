@@ -80,6 +80,20 @@ The mod makes no network calls and adds no hidden context for the model. `/fit` 
 - `log/YYYY-MM-DD.skip`: a rest day. If it contains `off`, the rest day was undone.
 - `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap`, in the same shape as a routine day.
 
+## What it does inside Claude Code
+
+A mod runs inside Claude Code, so here is everything Terminal Gym touches:
+
+- **Files it writes:** only its own data in `~/.claude/fitness` (the routine and the daily logs listed above). It never writes settings, instructions, build or start-up files.
+- **Settings it changes:** `/fit strict` and `/fit easy` turn its own *Strict mode* setting (`terminal-gym.strict`) on and off. That's the only setting it changes. It sets no environment variables; it reads `HOME` to find `~/.claude/fitness`.
+- **Permissions:** it never approves or denies a tool call, never changes your permission mode, and never runs a model or a process.
+- **Events it hooks:**
+  - `prompt.submit`: in strict mode, holds a prompt you typed while you're behind pace and puts its text back in the prompt box. Easy mode lets everything through. Prompts from other sources are never touched.
+  - `command.run`: answers its own `/fit` command, and nothing else.
+  - `session.start` and the SessionStart event after `/clear` or `/resume`: load today's state and register `/fit`. The event passes through unchanged.
+  - `turn.start` and `turn.complete`: time the easy-mode nudge and refresh the band.
+  - `ui.render`: draws the band, the scoreboard, the house rules and the walkthrough, and (easy mode) the suggested set in the spinner.
+
 ## Requirements
 
 Claude Code 2.1.288 or newer. The band and panes draw in the terminal and the Desktop app's Code tab. In the VS Code chat panel and `claude -p`, `/fit` still works but nothing is drawn. Mods are early access, so the API can change between Claude Code releases.
