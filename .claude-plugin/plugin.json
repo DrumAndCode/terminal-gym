@@ -17,7 +17,6 @@
     "mod",
     "productivity"
   ],
-  "types": "./types/index.d.ts",
   "userConfig": {
     "nudges": {
       "type": "boolean",
