@@ -350,16 +350,34 @@ export const register: Register = (on, options) => {
 
     const { Box, Button, Text } = $.ui.resolve(e)
 
+    // Lay the band out in rows that fit, widest first: one line, then the
+    // header over the buttons, then every piece on its own line.
+    const cols = e.props.bodyColumns
+    const WORDMARK = '▓ TERMINAL GYM ▓'
+    const TAGLINE = 'Your agent put in the reps. You next.'
+    const BUTTONS_WIDTH = 53
+
     if (!(await read($, isIntroduced))) {
-      return (
-        <Box>
-          <Text bold>▓ TERMINAL GYM ▓ </Text>
-          <Text dimColor>Your agent put in the reps. You next. </Text>
+      const buttons = (
+        <Box flexDirection={cols >= BUTTONS_WIDTH ? 'row' : 'column'}>
           <Button key="setup" label="Pick your training" variant="primary" onPress={() => void openOnboarding($)} />
-          <Text> </Text>
+          {cols >= BUTTONS_WIDTH && <Text> </Text>}
           <Button key="help" label="House rules" onPress={() => void $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })} />
-          <Text> </Text>
+          {cols >= BUTTONS_WIDTH && <Text> </Text>}
           <Button key="dismiss" label="Just train" onPress={() => void markIntroduced($)} />
+        </Box>
+      )
+      const header = (
+        <Box flexDirection={cols >= WORDMARK.length + TAGLINE.length + 2 ? 'row' : 'column'}>
+          <Text bold wrap="truncate-end">{WORDMARK}  </Text>
+          <Text dimColor wrap="truncate-end">{TAGLINE} </Text>
+        </Box>
+      )
+      const isOneLine = cols >= WORDMARK.length + TAGLINE.length + BUTTONS_WIDTH + 3
+      return (
+        <Box flexDirection={isOneLine ? 'row' : 'column'}>
+          {header}
+          {buttons}
         </Box>
       )
     }
@@ -368,17 +386,22 @@ export const register: Register = (on, options) => {
     const days = await read($, history)
     const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
+    const progress = `${withStreak(t, days)}${owed > 0 ? `  owe ${owed}` : ''}`
+    const LOG_WIDTH = 27
 
     return (
-      <Box>
-        <Text color={color} dimColor={color === undefined}>{withStreak(t, days)} </Text>
-        {owed > 0 && <Text bold>owe {owed} </Text>}
-        <Text dimColor>log </Text>
-        <Button key="add5" label="+5" onPress={add(5)} />
-        <Text> </Text>
-        <Button key="add10" label="+10" onPress={add(10)} />
-        <Text> </Text>
-        <Button key="add25" label="+25" onPress={add(25)} />
+      <Box flexDirection={cols >= progress.length + LOG_WIDTH + 1 ? 'row' : 'column'}>
+        <Text color={color} dimColor={color === undefined} wrap="truncate-end">
+          {progress}{' '}
+        </Text>
+        <Box>
+          <Text dimColor>log </Text>
+          <Button key="add5" label="+5" onPress={add(5)} />
+          <Text> </Text>
+          <Button key="add10" label="+10" onPress={add(10)} />
+          <Text> </Text>
+          <Button key="add25" label="+25" onPress={add(25)} />
+        </Box>
       </Box>
     )
   })

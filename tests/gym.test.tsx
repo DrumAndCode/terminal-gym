@@ -431,3 +431,20 @@ test('the barbell is terminal-only; other surfaces show the name', async ($, on)
     await ui.unmount()
   }
 })
+
+test('the bands stack instead of squeezing on narrow terminals', async ($, on) => {
+  const { files } = world(on, new Map(), { introduced: false })
+  await start($)
+  for (const bodyColumns of [140, 70, 40]) {
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns } })
+    expect(await ui.find({ type: 'Text', text: 'Your agent put in the reps. You next.' })).toBeDefined()
+    expect(await ui.find({ key: 'setup' })).toBeDefined()
+    expect(await ui.find({ key: 'dismiss' })).toBeDefined()
+    await ui.unmount()
+  }
+  const narrow = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns: 40 } })
+  await narrow.press({ key: 'dismiss' })
+  await narrow.press({ key: 'add10' })
+  expect(files.get(`${LOG}/2026-10-05`)).toBe('10\n')
+  await narrow.unmount()
+})
