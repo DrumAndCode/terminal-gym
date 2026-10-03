@@ -59,7 +59,11 @@ export const parseFit = (args: string): FitCommand => {
   if (head === 'score') return { kind: 'week' }
   if (head === 'rest') return { kind: 'skip' }
   if (head === 'program') return { kind: 'program' }
-  if (head === 'swap') return value === undefined ? { kind: 'swap' } : { kind: 'swap', exercise: value.toLowerCase() }
+  if (head === 'swap') {
+    // Names may be several words ("jumping jacks"): keep everything after "swap".
+    const name = args.trim().replace(/^swap\s*/, '').toLowerCase()
+    return name === '' ? { kind: 'swap' } : { kind: 'swap', exercise: name }
+  }
   if (head === 'rules') return { kind: 'help' }
   if (head === 'hide') return { kind: 'hide' }
   if (head === 'reset') return { kind: 'reset' }
@@ -160,6 +164,7 @@ export const parseCustom = (text: string): Routine | undefined => {
 export const pickSwap = (routine: Routine, current: string, wanted?: string) => {
   const plans = [...new Map(Object.values(routine).map(plan => [plan.exercise, plan])).values()]
   if (wanted !== undefined) return plans.find(plan => plan.exercise.toLowerCase() === wanted)
+  if (plans.length === 0) return undefined
   const at = plans.findIndex(plan => plan.exercise === current)
   return plans[(at + 1) % plans.length]
 }

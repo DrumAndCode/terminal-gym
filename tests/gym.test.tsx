@@ -379,3 +379,28 @@ describe('swap', () => {
     expect((await fit($, 'swap burpees')).text).toContain('No burpees')
   })
 })
+
+describe('swap edge cases', () => {
+  test('multi-word names, empty routines and same-exercise swaps', async ($, on) => {
+    expect(parseFit('swap jumping jacks')).toEqual({ kind: 'swap', exercise: 'jumping jacks' })
+    expect(pickSwap({}, 'pushups')).toBeUndefined()
+    const { files } = world(on, new Map([[`${HOME}/.claude/fitness/routine.json`, JSON.stringify({ mon: { exercise: 'jumping jacks', goal: 50 }, tue: { exercise: 'dips', goal: 100 } })]]))
+    await start($)
+    expect((await fit($, 'swap jumping jacks')).text).toContain('Already on jumping jacks')
+    expect((await fit($, 'swap dips')).text).toContain('0/100 dips')
+    files.set(`${HOME}/.claude/fitness/routine.json`, '{}')
+    expect((await fit($, 'swap')).text).toContain('no exercises')
+  })
+
+  test('a damaged swap file falls back to the routine', async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-05.swap`, '{oops']]))
+    await start($)
+    expect((await fit($, '')).text).toContain('0/100 pushups')
+  })
+
+  test('reps carry over and the reply says so', async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-05`, '40\n']]))
+    await start($)
+    expect((await fit($, 'swap squats')).text).toContain('Your 40 reps carry over')
+  })
+})

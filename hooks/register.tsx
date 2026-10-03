@@ -63,7 +63,16 @@ const readCount = async ($: $, path: string) => {
 // `/fit swap` leaves the day's plan beside its count as `<date>.swap`.
 const readSwap = async ($: $, logDir: string, date: string): Promise<Routine[string] | undefined> => {
   const path = `${logDir}/${date}.swap`
-  return (await $.fs.exists(path)) ? (JSON.parse(await $.fs.read(path)) as Routine[string]) : undefined
+  if (!(await $.fs.exists(path))) return undefined
+  // A damaged or odd file falls back to the routine instead of breaking every refresh.
+  try {
+    const plan = JSON.parse(await $.fs.read(path)) as Partial<Routine[string]>
+    return typeof plan.exercise === 'string' && typeof plan.goal === 'number'
+      ? { exercise: plan.exercise, goal: plan.goal, unit: plan.unit }
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 
 const refreshToday = async ($: $): Promise<Today> => {
@@ -250,14 +259,17 @@ export const register: Register = (on, options) => {
         const before = await refreshToday($)
         const { routine: routinePath, log: logDir } = await files($)
         const routine = await loadRoutine($, routinePath)
+        const names = [...new Set(Object.values(routine).map(p => p.exercise))]
+        if (names.length === 0) return { text: 'Your program has no exercises. /fit program to pick one.' }
         const plan = pickSwap(routine, before.exercise, cmd.exercise)
         if (plan === undefined) {
-          const names = [...new Set(Object.values(routine).map(p => p.exercise))].join(', ')
-          return { text: `No ${cmd.exercise} in your program. Pick one of: ${names}.` }
+          return { text: `No ${cmd.exercise} in your program. Pick one of: ${names.join(', ')}.` }
         }
+        if (plan.exercise === before.exercise) return { text: `Already on ${plan.exercise} today.` }
         await $.fs.write(`${logDir}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
         await refreshHistory($)
-        return { text: `Swapped to ${plan.exercise} today. ${line(await refreshToday($))}` }
+        const carried = before.count > 0 ? ` Your ${before.count} reps carry over.` : ''
+        return { text: `Swapped to ${plan.exercise} today.${carried} ${line(await refreshToday($))}` }
       }
       case 'program':
         await openOnboarding($)

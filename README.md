@@ -35,6 +35,7 @@ Local only, in `~/.claude/fitness`:
 
 - `routine.json`: the plan per weekday (`{ "mon": { "exercise": "pushups", "goal": 100 } }`, optional `"unit": "s"`).
 - `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day.
+- `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap` (JSON plan, same shape as a routine day).
 
 ## Develop
 
