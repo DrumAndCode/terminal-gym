@@ -464,9 +464,18 @@ test('the welcome band changes layout with width', async ($, on) => {
     await ui.unmount()
     return dirs
   }
-  expect(await layout(109)).toEqual(['row', 'row', 'row'])
-  expect(await layout(108)).toEqual(['column', 'row', 'row'])
-  expect(await layout(55)).toEqual(['column', 'row', 'row'])
-  expect(await layout(54)).toEqual(['column', 'column', 'row'])
+  expect(await layout(117)).toEqual(['row', 'row', 'row'])
+  expect(await layout(116)).toEqual(['column', 'row', 'row'])
+  expect(await layout(63)).toEqual(['column', 'row', 'row'])
+  expect(await layout(62)).toEqual(['column', 'column', 'row'])
   expect(await layout(52)).toEqual(['column', 'column', 'column'])
+})
+
+test('the band wordmark is a mini barbell', async ($, on) => {
+  world(on, new Map(), { introduced: false })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: '▐█▌━━ ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'TERMINAL GYM' })).toBeDefined()
+  await ui.unmount()
 })

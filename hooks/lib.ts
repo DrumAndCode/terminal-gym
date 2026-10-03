@@ -186,6 +186,9 @@ export const cells = (text: string) =>
 export const buttonsWidth = (labels: readonly string[]) =>
   labels.reduce((w, label) => w + cells(label) + 4, 0) + labels.length - 1
 
+// The band's one-line barbell wordmark.
+export const MINI_BARBELL = { left: '▐█▌━━ ', name: 'TERMINAL GYM', right: ' ━━▐█▌' } as const
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 

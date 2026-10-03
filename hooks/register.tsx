@@ -6,6 +6,7 @@ import {
   DEFAULT_ROUTINE,
   BARBELL,
   HELP,
+  MINI_BARBELL,
   ROUTINES,
   SIZES,
   bar,
@@ -355,7 +356,7 @@ export const register: Register = (on, options) => {
     // Lay the band out in rows that fit, widest first: one line, then the
     // header over the buttons, then every piece on its own line.
     const cols = e.props.bodyColumns
-    const WORDMARK = '▓ TERMINAL GYM ▓'
+    const WORDMARK = MINI_BARBELL.left + MINI_BARBELL.name + MINI_BARBELL.right
     const TAGLINE = 'Your agent put in the reps. You next.'
     const BUTTONS_WIDTH = buttonsWidth(['Pick your training', 'House rules', 'Just train'])
     const HEADER_WIDTH = cells(WORDMARK) + 2 + cells(TAGLINE)
@@ -372,7 +373,12 @@ export const register: Register = (on, options) => {
       )
       const header = (
         <Box key="header" flexDirection={cols >= HEADER_WIDTH ? 'row' : 'column'}>
-          <Text bold wrap="truncate-end">{WORDMARK}  </Text>
+          <Box>
+            <Text color="#d7af5f">{MINI_BARBELL.left}</Text>
+            <Text bold>{MINI_BARBELL.name}</Text>
+            <Text color="#d7af5f">{MINI_BARBELL.right}</Text>
+            <Text>  </Text>
+          </Box>
           <Text dimColor wrap="truncate-end">{TAGLINE}</Text>
         </Box>
       )
