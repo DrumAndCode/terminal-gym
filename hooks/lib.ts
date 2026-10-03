@@ -80,7 +80,7 @@ export const parseFit = (args: string): FitCommand => {
   return { kind: 'error', text: USAGE }
 }
 
-const isDone = (day: Day) => !day.isSkipped && day.goal > 0 && day.count >= day.goal
+export const isDone = (day: Day) => !day.isSkipped && day.goal > 0 && day.count >= day.goal
 
 // Today counts once done; an unfinished today does not break the run yet.
 export const streak = (history: readonly Day[]) => {
@@ -109,8 +109,6 @@ export const fullStreak = (history: readonly Day[], older: number) => {
   const coversWindow = run === history.length || (run === history.length - 1 && last !== undefined && !isDone(last))
   return coversWindow ? run + older : run
 }
-
-export const isDoneDay = (day: Day) => isDone(day)
 
 // One row per week, seven 2-cell days with a gap: 20 columns.
 export const heatCells = (history: readonly Day[]) => {

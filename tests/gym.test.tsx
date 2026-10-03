@@ -768,3 +768,18 @@ describe('streaks and today', () => {
     expect(calls).toContain('ui.open:gym-week')
   })
 })
+
+test('a long streak is cached, so later refreshes skip the walk back', async ($, on) => {
+  const routine = JSON.stringify(Object.fromEntries(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(d => [d, { exercise: 'pushups', goal: 10 }])))
+  const files = new Map<string, string>([[`${HOME}/.claude/fitness/routine.json`, routine]])
+  for (let i = 1; i <= 40; i++) {
+    const d = new Date(2026, 9, 5 - i, 12)
+    files.set(`${LOG}/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, '10\n')
+  }
+  const { calls } = world(on, files)
+  await start($)
+  calls.length = 0
+  expect((await fit($, '')).text).toContain('🔥40d')
+  // The window's 28 days are re-read; nothing older is.
+  expect(calls.filter(c => c === 'fs.exists').length).toBeLessThan(28 * 3 + 10)
+})

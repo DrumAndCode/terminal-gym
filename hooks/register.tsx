@@ -17,7 +17,7 @@ import {
   cells,
   dayKey,
   fullStreak,
-  isDoneDay,
+  isDone,
   describeRoutine,
   heatCells,
   lastDays,
@@ -115,6 +115,48 @@ const refreshToday = async ($: $): Promise<Today> => {
   return next
 }
 
+const DAY_MS = 86_400_000
+
+const readDay = async ($: $, routine: Routine, logDir: string, ms: number): Promise<Day> => {
+  const date = dayKey(ms)
+  const plan = (await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)]
+  return {
+    date,
+    count: await readCount($, `${logDir}/${date}`),
+    goal: plan?.goal ?? 0,
+    exercise: plan?.exercise ?? 'reps',
+    isSkipped: await readRest($, `${logDir}/${date}.skip`),
+  }
+}
+
+// Finished days in a row just before the window, so a streak can outlast it.
+// Cached per window: a full walk once, then one day's step as the window slides.
+const olderRun = async ($: $, days: readonly Day[], routine: Routine, logDir: string) => {
+  const first = days[0]
+  if (first === undefined || !isDone(first)) {
+    await $.store.delete('streakCache')
+    return 0
+  }
+  const oldest = lastDays(await $.clock.now(), HISTORY_DAYS)[0] ?? 0
+  const asOf = dayKey(oldest)
+  const cache = (await $.store.get('streakCache')) as { asOf?: string; older?: number } | undefined
+  let older: number
+  if (cache?.asOf === asOf && typeof cache.older === 'number') {
+    older = cache.older
+  } else if (cache?.asOf === dayKey(oldest - DAY_MS) && typeof cache.older === 'number') {
+    // The window moved on a day: the day that left it joins the older run.
+    older = isDone(await readDay($, routine, logDir, oldest - DAY_MS)) ? cache.older + 1 : 0
+  } else {
+    older = 0
+    for (let back = 1; back <= 366; back++) {
+      if (!isDone(await readDay($, routine, logDir, oldest - back * DAY_MS))) break
+      older++
+    }
+  }
+  await $.store.set('streakCache', { asOf, older })
+  return older
+}
+
 const refreshHistory = async ($: $) => {
   const { routine: routinePath, log: logDir } = await files($)
   const routine = await loadRoutine($, routinePath)
@@ -132,26 +174,7 @@ const refreshHistory = async ($: $) => {
     }),
   )
   await update($, history, () => days)
-  // A streak longer than the window: walk back past it, a day at a time.
-  let older = 0
-  const first = days[0]
-  if (first !== undefined && isDoneDay(first)) {
-    const oldest = lastDays(await $.clock.now(), HISTORY_DAYS)[0] ?? 0
-    for (let back = 1; back <= 366; back++) {
-      const ms = oldest - back * 86_400_000
-      const date = dayKey(ms)
-      const plan = (await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)]
-      const day = {
-        date,
-        count: await readCount($, `${logDir}/${date}`),
-        goal: plan?.goal ?? 0,
-        exercise: plan?.exercise ?? 'reps',
-        isSkipped: await readRest($, `${logDir}/${date}.skip`),
-      }
-      if (!isDoneDay(day)) break
-      older++
-    }
-  }
+  const older = await olderRun($, days, routine, logDir)
   await update($, olderStreak, () => older)
   return days
 }
@@ -384,7 +407,7 @@ export const register: Register = (on, options) => {
           return { text: 'Scoreboard closed.' }
         }
         const days = await refreshHistory($)
-        await $.ui.open({ id: PANE, title: 'TERMINAL GYM', closeOnEscape: true })
+        await $.ui.open({ id: PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
         return { text: `🔥 ${fullStreak(days, await read($, olderStreak))}-day streak · Esc or /fit score to close` }
       }
       case 'swap': {
