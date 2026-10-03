@@ -129,9 +129,9 @@ export const heatCells = (history: readonly Day[]) => {
   return { columns, rows: weeks, cells: (new Uint8Array(words.buffer) as Base64Bytes).toBase64() }
 }
 
-// Same muted accents the old statusline used: amber in progress, green done.
+// Muted traffic light: red under a third of the goal, yellow on the way, green done.
 export const progressColor = (count: number, goal: number) =>
-  goal > 0 && count >= goal ? '#87af87' : count > 0 ? '#d7af5f' : undefined
+  goal > 0 && count >= goal ? '#87af87' : goal > 0 && count / goal >= 1 / 3 ? '#d7af5f' : '#d75f5f'
 
 export const daily = (exercise: string, goal: number): Routine =>
   Object.fromEntries(WEEKDAYS.map(day => [day, { exercise, goal }]))
@@ -187,7 +187,8 @@ export const buttonsWidth = (labels: readonly string[]) =>
   labels.reduce((w, label) => w + cells(label) + 4, 0) + labels.length - 1
 
 // The band's one-line barbell wordmark.
-export const MINI_BARBELL = { left: '▐█▌━━ ', name: 'TERMINAL GYM', right: ' ━━▐█▌' } as const
+// Small plate, big plate, bar: ❚█═TERMINAL-GYM═█❚
+export const MINI_BARBELL = { small: '❚', plate: '█═', name: 'TERMINAL-GYM', plateRight: '═█' } as const
 
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')

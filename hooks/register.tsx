@@ -356,7 +356,7 @@ export const register: Register = (on, options) => {
     // Lay the band out in rows that fit, widest first: one line, then the
     // header over the buttons, then every piece on its own line.
     const cols = e.props.bodyColumns
-    const WORDMARK = MINI_BARBELL.left + MINI_BARBELL.name + MINI_BARBELL.right
+    const WORDMARK = MINI_BARBELL.small + MINI_BARBELL.plate + MINI_BARBELL.name + MINI_BARBELL.plateRight + MINI_BARBELL.small
     const TAGLINE = 'Your agent put in the reps. You next.'
     const BUTTONS_WIDTH = buttonsWidth(['Pick your training', 'House rules', 'Just train'])
     const HEADER_WIDTH = cells(WORDMARK) + 2 + cells(TAGLINE)
@@ -375,10 +375,12 @@ export const register: Register = (on, options) => {
         <Box key="header" flexDirection={cols >= HEADER_WIDTH ? 'row' : 'column'}>
           {cols >= cells(WORDMARK) ? (
             <Box>
-              <Text color="#d7af5f">{MINI_BARBELL.left}</Text>
+              <Text dimColor>{MINI_BARBELL.small}</Text>
+              <Text color="#d7af5f">{MINI_BARBELL.plate}</Text>
               <Text bold>{MINI_BARBELL.name}</Text>
-              <Text color="#d7af5f">{MINI_BARBELL.right}</Text>
-              <Text>  </Text>
+              <Text color="#d7af5f">{MINI_BARBELL.plateRight}</Text>
+              <Text dimColor>{MINI_BARBELL.small}</Text>
+              {cols >= HEADER_WIDTH && <Text>  </Text>}
             </Box>
           ) : (
             <Text bold wrap="truncate-end">
@@ -407,7 +409,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box key="tracker" flexDirection={cols >= cells(progress) + 1 + logWidth ? 'row' : 'column'}>
-        <Text color={color} dimColor={color === undefined} wrap="truncate-end">
+        <Text color={color} wrap="truncate-end">
           {progress}{' '}
         </Text>
         <Box>
