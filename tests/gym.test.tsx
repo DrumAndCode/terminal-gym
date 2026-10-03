@@ -689,13 +689,15 @@ test('score rows name each day\'s exercise', async ($, on) => {
   await ui.unmount()
 })
 
-test('/clear runs the setup again', async ($, on) => {
+test('/clear and /resume run the setup again', async ($, on) => {
   on('classic.SessionStart', () => ({}))
   const { registered } = world(on)
   await start($)
   expect(registered).toEqual(['fit'])
   await $.classic.SessionStart({ source: 'clear' })
   expect(registered).toEqual(['fit', 'fit'])
+  await $.classic.SessionStart({ source: 'resume' })
+  expect(registered).toEqual(['fit', 'fit', 'fit'])
   await $.classic.SessionStart({ source: 'compact' })
-  expect(registered).toEqual(['fit', 'fit'])
+  expect(registered).toEqual(['fit', 'fit', 'fit'])
 })

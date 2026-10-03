@@ -288,12 +288,6 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
 
 // Everything a conversation needs: the /fit command and today's state.
 const boot = async ($: $, isStrict: boolean) => {
-  await $.command.register({
-    name: 'fit',
-    description: "Log reps toward today's goal",
-    argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
-    immediate: true,
-  })
   const stored = Number((await $.store.get('debt')) ?? 0)
   await update($, debt, () => (isStrict ? stored : 0))
   await syncUnlocked($)
@@ -307,6 +301,13 @@ const boot = async ($: $, isStrict: boolean) => {
   await update($, isIntroduced, () => introduced)
   await refreshToday($)
   await refreshHistory($)
+  // Last, so a refused registration can't leave the band without its state.
+  await $.command.register({
+    name: 'fit',
+    description: "Log reps toward today's goal",
+    argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
+    immediate: true,
+  })
 }
 
 export const register: Register = (on, options) => {
@@ -320,10 +321,10 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // /clear starts a new conversation in the same process without another
-  // session.start, so the setup above runs again here.
+  // /clear and an in-session /resume switch to another conversation in the
+  // same process without another session.start, so the setup runs again here.
   on('classic.SessionStart', async ($, e, next) => {
-    if (e.source === 'clear') await boot($, isStrict)
+    if (e.source === 'clear' || e.source === 'resume') await boot($, isStrict)
     return next(e)
   })
 
