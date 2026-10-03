@@ -219,6 +219,7 @@ describe('drawing', () => {
     for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
       const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...PANE })
       expect(await ui.find({ type: 'Text', text: /2-day streak/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: 'TERMINAL GYM' })).toBeDefined()
       await ui.unmount()
     }
   })
@@ -404,4 +405,17 @@ describe('swap edge cases', () => {
     await start($)
     expect((await fit($, 'swap squats')).text).toContain('Your 40 reps carry over')
   })
+})
+
+test('the scoreboard draws the barbell when it fits and the name alone when narrow', async ($, on) => {
+  world(on)
+  await start($)
+  await fit($, 'score')
+  const wide = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
+  expect(await wide.find({ type: 'Text', text: '▐█▌▐█▌━━━' })).toBeDefined()
+  await wide.unmount()
+  const narrow = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 24 } })
+  expect(await narrow.find({ type: 'Text', text: '▐█▌' })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: 'TERMINAL GYM' })).toBeDefined()
+  await narrow.unmount()
 })

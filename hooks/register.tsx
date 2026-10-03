@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Day, OnboardPick, Today } from '../types'
 import {
   DEFAULT_ROUTINE,
+  BARBELL,
   HELP,
   ROUTINES,
   SIZES,
@@ -389,15 +390,34 @@ export const register: Register = (on, options) => {
     const heat = heatCells(days)
     const week = days.slice(-7)
 
+    const { Box, Text } = $.ui.resolve(e)
+    // Too narrow for the bar: the name alone.
+    const barbell =
+      e.props.bodyColumns >= BARBELL.width ? (
+        <Box flexDirection="column">
+          <Text color="#d7af5f">{BARBELL.plates}</Text>
+          <Box>
+            <Text color="#d7af5f">{BARBELL.left}</Text>
+            <Text bold>{BARBELL.name}</Text>
+            <Text color="#d7af5f">{BARBELL.right}</Text>
+          </Box>
+          <Text color="#d7af5f">{BARBELL.plates}</Text>
+          <Text> </Text>
+        </Box>
+      ) : (
+        <Text bold>{BARBELL.name}</Text>
+      )
+
     const summary = week.map(day => {
       const mark = day.isSkipped ? '–' : day.goal > 0 && day.count >= day.goal ? '✓' : '·'
       return `${mark} ${day.date.slice(5)}  ${day.count}/${day.goal}`
     })
 
     if (e.surface === 'terminal') {
-      const { Box, Button, Text, Raster } = $.ui.resolve(e)
+      const { Button, Raster } = $.ui.resolve(e)
       return (
         <Box flexDirection="column">
+          {barbell}
           <Text bold>🔥 {run}-day streak</Text>
           {t !== null && <Text dimColor>{line(t)}</Text>}
           <Text> </Text>
@@ -411,9 +431,10 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Button } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
+        {barbell}
         <Text bold>🔥 {run}-day streak</Text>
         {t !== null && <Text dimColor>{line(t)}</Text>}
         {summary.map(row => <Text dimColor>{row}</Text>)}

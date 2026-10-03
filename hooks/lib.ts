@@ -169,6 +169,15 @@ export const pickSwap = (routine: Routine, current: string, wanted?: string) => 
   return plans[(at + 1) % plans.length]
 }
 
+// The scoreboard's barbell, the name across the bar. 34 columns wide.
+export const BARBELL = {
+  plates: ' ▐█▌▐█▌                    ▐█▌▐█▌',
+  left: '━▐█▌▐█▌━━━ ',
+  name: 'TERMINAL GYM',
+  right: ' ━━━▐█▌▐█▌━',
+  width: 34,
+} as const
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
