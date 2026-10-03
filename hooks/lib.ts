@@ -222,7 +222,8 @@ or press **+5 / +10 / +25** above the prompt
 Off by default. When it's on:
 - long turns put you in rep debt
 - your next prompt waits until you pay
-- any reps unlock prompts for a minute; the rest comes due after
+- log any reps to unlock your next prompt, plus every prompt for 2 minutes after
+- whatever's left comes due on the prompt after that
 - \`/fit rest\` bails, but costs your streak
 
 **Turn it on:** type \`/fit strict\`
