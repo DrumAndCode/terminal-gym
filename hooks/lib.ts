@@ -52,7 +52,7 @@ export type FitCommand =
   | { kind: 'set'; n: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | tour | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -68,7 +68,7 @@ export const parseFit = (args: string): FitCommand => {
   if (head === 'rules') return { kind: 'help' }
   if (head === 'hide') return { kind: 'hide' }
   if (head === 'reset') return { kind: 'reset' }
-  if (head === 'tour') return { kind: 'intro' }
+  if (head === 'start') return { kind: 'intro' }
   if (head === 'strict') return { kind: 'strict', isOn: true }
   if (head === 'easy') return { kind: 'strict', isOn: false }
   if (head === 'set') {
@@ -217,7 +217,7 @@ or press **+5 / +10 / +25** above the prompt
 | \`/fit program\` | pick your training |
 | \`/fit strict\` / \`/fit easy\` | strict mode on / off |
 | \`/fit rules\` | these rules |
-| \`/fit tour\` | replay the welcome |
+| \`/fit start\` | replay the welcome |
 | \`/fit hide\` | close panels |
 
 ### Strict mode

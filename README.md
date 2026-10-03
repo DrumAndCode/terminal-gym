@@ -43,7 +43,7 @@ To hack on it, clone the repo and load it for one session with `claude --plugin-
 | `/fit program` | pick your program |
 | `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit rules` | house rules |
-| `/fit tour` | replay the welcome |
+| `/fit start` | replay the welcome |
 | `/fit hide` | close panels |
 
 Settings live in `/config` under terminal-gym: nudges, strict mode, nudge delay, reps per nudge, spinner takeover, band.
