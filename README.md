@@ -8,7 +8,9 @@ A Claude Code mod for a daily bodyweight rep goal. While Claude works, you train
 claude plugin marketplace add DrumAndCode/terminal-gym && claude plugin install terminal-gym@terminal-gym
 ```
 
-Start a new Claude Code chat and the welcome band appears above your prompt.
+Start a new Claude Code session and the welcome band appears above your prompt.
+
+![The Terminal Gym band above the Claude Code prompt: 0/100 pushups, behind 10, with +5, +10 and +25 buttons](docs/band.png)
 
 ## What you get
 
@@ -17,7 +19,7 @@ Start a new Claude Code chat and the welcome band appears above your prompt.
 - **Set reminders**: a toast when each set comes due.
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
 - **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
-- **Scoreboard** (`/fit score`): an ASCII barbell, your streak, a 28-day grid and the last week by exercise, with today marked.
+- **Scoreboard** (`/fit score`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.
 - **Streaks**: count every day you hit your goal, for as long as you keep it going.
 
 ## How a strict day works
