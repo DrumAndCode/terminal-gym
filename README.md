@@ -2,73 +2,99 @@
 
 **Your agent put in the reps. You next.**
 
-A Claude Code mod for a daily bodyweight rep goal. When Claude runs a long turn, that's your cue for a set.
-
-## What it does
-
-- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`, grey at 0 then red, yellow and green as you close in on the goal.
-- **Set reminders**: a toast tells you when each set comes due, and the band shows `next set 10:53` or `behind 10`.
-- **Long-turn nudges**: after 30s of Claude working, a toast and the spinner suggest a set. Easy mode only.
-- **Strict mode** (opt-in): today's goal is split into sets spread over 8 hours (by default) from your first prompt of the day, with the first set due right away. Prompts before 5am count as the night before. Fall behind and your prompts wait until you catch up, so the work gets spread through the day and done by the end of it.
-- **Scoreboard** (`/fit score`): a barbell, your streak and a 28-day grid.
-- **Walkthrough**: three steps on first run to pick a program.
-
-## Install
-
-Requires Claude Code 2.1.288 or newer.
+A Claude Code mod for a daily bodyweight rep goal. While Claude works, you train: log sets from a band above your prompt, keep a streak, and let strict mode spread the reps through your day.
 
 ```sh
-claude plugin marketplace add DrumAndCode/terminal-gym
-claude plugin install terminal-gym@terminal-gym
+claude plugin marketplace add DrumAndCode/terminal-gym && claude plugin install terminal-gym@terminal-gym
 ```
 
-Or from inside a session: `/plugin install terminal-gym --marketplace DrumAndCode/terminal-gym`.
+Start a new Claude Code chat and the welcome band appears above your prompt.
 
-Start a new session and the welcome band shows above your prompt. Update later with `claude plugin update terminal-gym@terminal-gym`.
+## What you get
 
-To hack on it, clone the repo and load it for one session with `claude --plugin-dir ./terminal-gym`.
+- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set 10:53  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`. It's grey at 0, then red, yellow and green as you close in on the goal.
+- **Walkthrough**: three steps on first run: what the mod does, pick your program, how streaks and the scoreboard work.
+- **Set reminders**: a toast when each set comes due.
+- **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
+- **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
+- **Scoreboard** (`/fit score`): an ASCII barbell, your streak, a 28-day grid and the last week by exercise, with today marked.
+- **Streaks**: count every day you hit your goal, for as long as you keep it going.
+
+## How a strict day works
+
+Strict mode spreads today's goal into evenly spaced sets over a training window (8 hours by default) that starts with your first prompt of the day. With 100 pushups:
+
+| When | What happens |
+|---|---|
+| First prompt (say 9:00) | The day starts and the opening set is due. Your prompt waits: *"Behind pace: 10 pushups to catch up (10/100 due by now). /fit 10 to log."* |
+| After `/fit 10` | You're through. The band reads `next set 09:53` |
+| 9:53 | Toast: *"⏱ Set due: 10 pushups. 20/100 by now."* Your next prompt waits until you log it |
+| …about every 53 minutes… | Ten sets in all, the last due 8 hours after your first prompt |
+| Goal done, or a rest day | Nothing waits |
+
+Only prompts you type can be held. Background tasks, `/loop` runs, messages from other sessions and slash commands like `/fit 10` always go through. Prompts before 5am count as the night before, so a late night never leaves you a wall of overdue sets in the morning.
+
+Easy mode (the default) shows the same schedule on the band and the same reminders, but never holds a prompt.
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `/fit` | today's progress |
+| `/fit` | today's progress, pace and streak |
 | `/fit 20` | log 20 reps |
 | `/fit set 80` | fix today's count |
 | `/fit reset` | today back to 0 |
-| `/fit swap [exercise]` | switch today's exercise (next in your program, or the one named) |
-| `/fit rest` | rest day (breaks streak, no sets due) |
+| `/fit swap [exercise]` | switch today's exercise: the next in your program, or the one you name |
+| `/fit rest` | rest day: no sets due, breaks your streak |
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
-| `/fit score` | streak + grid |
-| `/fit program` | pick your program |
+| `/fit score` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
+| `/fit program` | pick your program (the walkthrough) |
 | `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit rules` | house rules |
 | `/fit start` | replay the welcome |
 | `/fit hide` | close panels |
 
-Settings live in `/config` under terminal-gym: nudges, strict mode, training window, set size, nudge delay, reps per nudge, spinner takeover, band.
+## Settings
 
-## Privacy
+In `/config`, under terminal-gym:
 
-The mod makes no network calls and adds no hidden context for the model. `/fit` replies appear in your conversation like any slash command's output, so Claude can see them. Everything else stays in `~/.claude/fitness`:
+| Setting | Default | What it does |
+|---|---|---|
+| Strict mode | off | Hold typed prompts while you're behind pace |
+| Training window | 8 hours | How long after your first prompt the day's sets are spread over |
+| Set size | auto | Reps per set; auto is a tenth of the goal, rounded to fives |
+| Long-turn nudges | on | Easy mode: suggest a set when a turn runs long |
+| Nudge after | 30 seconds | How long a turn runs before the nudge |
+| Reps per nudge | 10 | The set the nudge suggests |
+| Spinner takeover | on | Easy mode: show the suggested set in the spinner |
+| Quick-log band | on | Show the tracker band above the prompt |
 
-- `routine.json`: the plan per weekday (`{ "mon": { "exercise": "pushups", "goal": 100 } }`, optional `"unit": "s"`).
-- `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day; if it contains `off`, the rest day was undone (`/fit rest off`). The standalone `fit` shell script doesn't know about undone rest days.
-- `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap` (JSON plan, same shape as a routine day).
+## Privacy and data
+
+The mod makes no network calls and adds no hidden context for the model. `/fit` replies appear in your conversation like any slash command's output, so Claude can see them. Everything else stays on your machine, in `~/.claude/fitness`:
+
+- `routine.json`: the plan per weekday, for example `{ "mon": { "exercise": "pushups", "goal": 100 } }`, with an optional `"unit": "s"` for timed exercises. Edit it for a custom program.
+- `log/YYYY-MM-DD`: that day's count.
+- `log/YYYY-MM-DD.skip`: a rest day. If it contains `off`, the rest day was undone.
+- `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap`, in the same shape as a routine day.
+
+## Requirements
+
+Claude Code 2.1.288 or newer. The band and panes draw in the terminal and the Desktop app's Code tab. In the VS Code chat panel and `claude -p`, `/fit` still works but nothing is drawn. Mods are early access, so the API can change between Claude Code releases.
+
+Update with `claude plugin update terminal-gym@terminal-gym`. From inside a chat, you can also install with `/plugin install terminal-gym --marketplace DrumAndCode/terminal-gym`.
 
 ## Contributing
 
 Issues and PRs welcome. Keep changes small and include a test.
 
 ```sh
-claude --plugin-dir .          # load it for one session
-claude plugin validate .
+claude --plugin-dir .          # load your checkout for one session
+claude plugin validate --strict .
 claude plugin test .
 ```
 
 `claude plugin test` runs `tests/*.test.tsx` against the engine itself. Once the mod has loaded, `tsc -p .` type-checks it against the engine's types in `.claude-plugin/types/`.
-
-Mods are early access; the API can change between Claude Code releases.
 
 ## License
 
