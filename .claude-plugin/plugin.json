@@ -28,8 +28,20 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Every prompt you send adds rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
+      "description": "Spread today's goal into sets from your first prompt; fall behind and prompts wait until you catch up (/fit rest breaks your streak instead).",
       "default": false
+    },
+    "windowHours": {
+      "type": "number",
+      "title": "Training window (hours)",
+      "description": "How long after your first prompt the day's sets are spread over.",
+      "default": 8
+    },
+    "setSize": {
+      "type": "number",
+      "title": "Set size",
+      "description": "Reps per set; 0 means a tenth of the day's goal, rounded to fives.",
+      "default": 0
     },
     "nudgeSeconds": {
       "type": "number",
@@ -40,7 +52,7 @@
     "nudgeReps": {
       "type": "number",
       "title": "Reps per nudge",
-      "description": "Reps suggested per long turn, or owed per prompt in strict mode.",
+      "description": "Reps suggested per long turn in easy mode.",
       "default": 10
     },
     "spinner": {

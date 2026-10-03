@@ -1,4 +1,4 @@
-import type { Day } from '../types'
+import type { Day, Pace } from '../types'
 
 export type Routine = Record<string, { exercise: string; goal: number; unit?: string }>
 
@@ -192,6 +192,41 @@ export const buttonsWidth = (labels: readonly string[]) =>
 // Small plate, big plate, bar: ❚█═TERMINAL-GYM═█❚
 export const MINI_BARBELL = { small: '❚', plate: '█═', name: 'TERMINAL-GYM', plateRight: '═█' } as const
 
+// A set is a tenth of the goal, rounded to fives, unless the person picked a size.
+export const setSizeFor = (goal: number, setting: number) => {
+  if (goal <= 0) return 0
+  if (setting > 0) return Math.min(setting, goal)
+  return Math.min(goal, Math.max(5, Math.round(goal / 10 / 5) * 5))
+}
+
+// The goal as evenly spaced sets: the first due at the start, the last at the
+// end of the window. `required` is what should be done by `now`.
+export const paceAt = (
+  goal: number,
+  count: number,
+  setSize: number,
+  startedAt: number,
+  now: number,
+  windowMs: number,
+): Pace => {
+  if (goal <= 0 || setSize <= 0) return { required: 0, behind: 0, setSize, nextDueAt: null }
+  const sets = Math.ceil(goal / setSize)
+  const gap = sets > 1 ? windowMs / (sets - 1) : windowMs
+  const due = Math.min(sets, 1 + Math.floor(Math.max(0, now - startedAt) / gap))
+  const required = Math.min(goal, due * setSize)
+  return {
+    required,
+    behind: Math.max(0, required - count),
+    setSize,
+    nextDueAt: due < sets ? startedAt + due * gap : null,
+  }
+}
+
+export const clockTime = (ms: number) => {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
@@ -222,10 +257,10 @@ or press **+5 / +10 / +25** above the prompt
 
 ### Strict mode
 Off by default. When it's on:
-- every prompt you send puts you in rep debt
-- your next prompt waits until you pay
-- log any reps to unlock your next prompt, plus every prompt for 2 minutes after
-- whatever's left comes due when the 2 minutes are up
+- today's goal is split into sets, spread over 8 hours from your first prompt
+- the first set is due right away
+- fall behind and your prompts wait until you catch up
+- a toast tells you when each set comes due
 - \`/fit rest\` bails, but costs your streak
 
 **Turn it on:** type \`/fit strict\`

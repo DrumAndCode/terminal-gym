@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Day, OnboardPick, Today } from '../types'
+import type { Day, OnboardPick, Pace, Today } from '../types'
 import {
   DEFAULT_ROUTINE,
   BARBELL,
@@ -10,6 +10,9 @@ import {
   ROUTINES,
   SIZES,
   bar,
+  clockTime,
+  paceAt,
+  setSizeFor,
   buttonsWidth,
   cells,
   dayKey,
@@ -31,17 +34,18 @@ const PANE = 'gym-week'
 const HELP_PANE = 'gym-help'
 const ONBOARD_PANE = 'gym-onboard'
 const HISTORY_DAYS = 28
-const GRACE_MS = 2 * 60_000
 const TOAST_MS = 10_000
+const HOUR_MS = 60 * 60_000
 
 // Toasts stay up long enough to read mid-set.
 const toast = ($: $, text: string) => $.ui.toast(text, { timeoutMs: TOAST_MS })
 
-let breakTimer: { cancel: () => void } | undefined
+// The pace settings, set from the options each time the module registers.
+const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
+let dueTimer: { cancel: () => void } | undefined
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
-const debt = atom({ plugin: 'terminal-gym', key: 'debt' } as const, 0)
-const isUnlocked = atom({ plugin: 'terminal-gym', key: 'isUnlocked' } as const, false)
+const pace = atom({ plugin: 'terminal-gym', key: 'pace' } as const, null)
 const isWaiting = atom({ plugin: 'terminal-gym', key: 'isWaiting' } as const, false)
 const history = atom({ plugin: 'terminal-gym', key: 'history' } as const, [])
 const isIntroduced = atom({ plugin: 'terminal-gym', key: 'isIntroduced' } as const, false)
@@ -128,34 +132,51 @@ const refreshHistory = async ($: $) => {
   return days
 }
 
-const setDebt = async ($: $, n: number) => {
-  await $.store.set('debt', n)
-  // A pass only covers debt that's still owed; never carry one into the next debt.
-  if (n === 0) await $.store.set('hasPass', false)
-  await update($, debt, () => n)
-  await syncUnlocked($)
+// The day starts at the person's first prompt; sets are spread from there.
+const dayStart = async ($: $, date: string) => {
+  const stored = (await $.store.get('dayStart')) as { date?: string; at?: number } | undefined
+  return stored?.date === date && typeof stored.at === 'number' ? stored.at : undefined
 }
 
-// Whether paid reps currently let prompts through: an unused pass, or inside the break.
-const syncUnlocked = async ($: $) => {
-  const owed = await read($, debt)
-  const paidAt = Number((await $.store.get('paidAt')) ?? 0)
-  const hasPass = (await $.store.get('hasPass')) === true
-  const isOpen = owed > 0 && (hasPass || (await $.clock.now()) - paidAt < GRACE_MS)
-  await update($, isUnlocked, () => isOpen)
-  return isOpen
+const startDay = async ($: $) => {
+  const date = dayKey(await $.clock.now())
+  if ((await dayStart($, date)) === undefined) await $.store.set('dayStart', { date, at: await $.clock.now() })
+}
+
+// Recomputes the pace and arms a timer for the next set coming due.
+const refreshPace = async ($: $): Promise<Pace | null> => {
+  dueTimer?.cancel()
+  dueTimer = undefined
+  const t = await read($, today)
+  const at = t === null ? undefined : await dayStart($, t.date)
+  const now = await $.clock.now()
+  const next: Pace | null =
+    t === null || t.isRest || at === undefined
+      ? null
+      : paceAt(t.goal, t.count, setSizeFor(t.goal, paceConfig.setSize), at, now, paceConfig.windowMs)
+  await update($, pace, () => next)
+  if (next?.nextDueAt != null && t !== null && t.count < t.goal) {
+    dueTimer = $.clock.after(Math.max(1, next.nextDueAt - now), () => void setDue($))
+  }
+  return next
+}
+
+const setDue = async ($: $) => {
+  const p = await refreshPace($)
+  const t = await read($, today)
+  if (p === null || t === null || p.behind <= 0) return
+  toast($, `⏱ Set due: ${p.behind} ${t.exercise}. ${p.required}/${t.goal} by now.`)
+}
+
+const paceText = (p: Pace | null, isStrict: boolean) => {
+  if (p === null) return ''
+  if (p.behind > 0) return `  behind ${p.behind}${isStrict ? ' · prompts wait' : ''}`
+  return p.nextDueAt === null ? '' : `  next set ${clockTime(p.nextDueAt)}`
 }
 
 const line = (t: Today) => {
   const isDone = t.goal > 0 && t.count >= t.goal
   return `${isDone ? '✅' : '💪'} ${bar(t.count, t.goal)} ${t.count}/${t.goal}${t.unit} ${t.exercise}`
-}
-
-// What a payment bought, for the /fit reply.
-const paidNote = (owedBefore: number, owedAfter: number) => {
-  if (owedAfter >= owedBefore) return ''
-  if (owedAfter === 0) return ' · debt paid'
-  return ` · debt ${owedAfter} left · next prompt + 2 min unlocked`
 }
 
 const withStreak = (t: Today, days: readonly Day[]) => {
@@ -174,37 +195,11 @@ const logReps = async ($: $, change: (count: number) => number) => {
     days.map(day => (day.date === after.date ? { ...day, count } : day)),
   )
 
-  const added = count - before.count
-  const owed = await read($, debt)
-  if (added > 0) {
-    breakTimer?.cancel()
-    breakTimer = $.clock.after(GRACE_MS, () => void breakOver($))
-  }
-  if (added > 0 && owed > 0) {
-    const left = Math.max(0, owed - added)
-    await setDebt($, left)
-    await $.store.set('paidAt', await $.clock.now())
-    if (left > 0) await $.store.set('hasPass', true)
-    await syncUnlocked($)
-  }
+  await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
   return after
-}
-
-// Fires two minutes after the last logged set.
-const breakOver = async ($: $) => {
-  breakTimer = undefined
-  await syncUnlocked($)
-  const t = await read($, today)
-  if (t?.isRest === true) return
-  const owed = await read($, debt)
-  if (owed > 0) {
-    toast($, `⏱ Break's over. Debt ${owed} ${t?.exercise ?? 'reps'} left; prompts wait for your next set.`)
-  } else if (t !== null && t.goal > 0 && t.count < t.goal) {
-    toast($, `⏱ Break's over. Next set? ${t.count}/${t.goal}${t.unit} ${t.exercise}.`)
-  }
 }
 
 // Easy mode: a suggestion once a turn runs long.
@@ -215,22 +210,13 @@ const nudge = async ($: $, reps: number) => {
   toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
 }
 
-// Strict mode: every prompt the person sends costs reps, however short the turn.
-const chargeTurn = async ($: $, reps: number) => {
-  const t = await read($, today)
-  if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
-  await update($, isWaiting, () => true)
-  const owed = (await read($, debt)) + reps
-  await setDebt($, owed)
-  toast($, `Your agent's mid-set. +${reps} ${t.exercise} added · debt ${owed} left.`)
-}
-
 const endRest = async ($: $) => {
   const t = await refreshToday($)
   if (!t.isRest) return { text: `Today isn't a rest day. ${line(t)}` }
   await $.fs.write(`${(await files($)).log}/${t.date}.skip`, 'off\n')
   const back = await refreshToday($)
   await refreshHistory($)
+  await refreshPace($)
   return { text: `Rest day undone. Back to work. ${line(back)}` }
 }
 
@@ -292,20 +278,13 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
 }))
 
 // Everything a conversation needs: the /fit command and today's state.
-const boot = async ($: $, isStrict: boolean) => {
-  const stored = Number((await $.store.get('debt')) ?? 0)
-  await update($, debt, () => (isStrict ? stored : 0))
-  await syncUnlocked($)
-  // A restart mid-break loses the timer: start one for whatever's left of it.
-  const breakLeft = Number((await $.store.get('paidAt')) ?? 0) + GRACE_MS - (await $.clock.now())
-  if (breakLeft > 0) {
-    breakTimer?.cancel()
-    breakTimer = $.clock.after(breakLeft, () => void breakOver($))
-  }
+const boot = async ($: $) => {
   const introduced = (await $.store.get('introduced')) === true
   await update($, isIntroduced, () => introduced)
   await refreshToday($)
   await refreshHistory($)
+  // Re-arms the due timer, which a restart or reload drops.
+  await refreshPace($)
   // Last, so a refused registration can't leave the band without its state.
   await $.command.register({
     name: 'fit',
@@ -319,17 +298,19 @@ export const register: Register = (on, options) => {
   const isStrict = options.strict === true
   const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
   const nudgeReps = Number(options.nudgeReps ?? 10)
+  paceConfig.setSize = Number(options.setSize ?? 0)
+  paceConfig.windowMs = Math.max(1, Number(options.windowHours ?? 8)) * HOUR_MS
   let timer: { cancel: () => void } | undefined
 
   on('session.start', async ($, e, next) => {
-    await boot($, isStrict)
+    await boot($)
     return next(e)
   })
 
   // /clear and an in-session /resume switch to another conversation in the
   // same process without another session.start, so the setup runs again here.
   on('classic.SessionStart', async ($, e, next) => {
-    if (e.source === 'clear' || e.source === 'resume') await boot($, isStrict)
+    if (e.source === 'clear' || e.source === 'resume') await boot($)
     return next(e)
   })
 
@@ -341,21 +322,18 @@ export const register: Register = (on, options) => {
       case 'add':
       case 'set': {
         if ((await refreshToday($)).isRest) return { text: "Today's a rest day. /fit rest off to train." }
-        const owedBefore = await read($, debt)
         const n = cmd.n
         const t = await logReps($, count => (cmd.kind === 'add' ? count + n : n))
-        return { text: `${line(t)}${paidNote(owedBefore, await read($, debt))}` }
+        return { text: `${line(t)}${paceText(await read($, pace), isStrict)}` }
       }
       case 'skip': {
         const t = await refreshToday($)
         if (t.isRest) return { text: 'Already a rest day. /fit rest off to train.' }
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
-        await setDebt($, 0)
-        breakTimer?.cancel()
-        breakTimer = undefined
         await refreshToday($)
         await refreshHistory($)
-        return { text: `Rest day logged. Streak resets, debt cleared. Back at it tomorrow. (/fit rest off to undo)` }
+        await refreshPace($)
+        return { text: `Rest day logged. Streak resets, no sets due today. Back at it tomorrow. (/fit rest off to undo)` }
       }
       case 'unskip':
         return endRest($)
@@ -383,7 +361,9 @@ export const register: Register = (on, options) => {
         await refreshHistory($)
         const amount = before.unit === '' ? `${before.count} reps` : `${before.count}${before.unit}`
         const carried = before.count > 0 ? ` Your ${amount} carry over.` : ''
-        return { text: `Swapped to ${plan.exercise} today.${carried} ${line(await refreshToday($))}` }
+        const swapped = await refreshToday($)
+        await refreshPace($)
+        return { text: `Swapped to ${plan.exercise} today.${carried} ${line(swapped)}` }
       }
       case 'program':
         await openOnboarding($)
@@ -393,7 +373,7 @@ export const register: Register = (on, options) => {
         await update($, isIntroduced, () => false)
         return { text: 'Welcome is back above your prompt.' }
       case 'reset':
-        return { text: `Reset. ${line(await logReps($, () => 0))}` }
+        return { text: `Reset. ${line(await logReps($, () => 0))}${paceText(await read($, pace), isStrict)}` }
       case 'help':
         await markIntroduced($)
         await $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })
@@ -403,8 +383,8 @@ export const register: Register = (on, options) => {
         if (deny !== undefined) return { text: `Couldn't change strict mode: ${deny}` }
         return {
           text: cmd.isOn
-            ? `Coach is strict. Every prompt you send costs ${nudgeReps} reps, and the next one waits until you pay.`
-            : 'Coach is easy. A nudge when a turn runs long, no debt.',
+            ? `Coach is strict. Today's goal is spread into sets over ${paceConfig.windowMs / HOUR_MS}h from your first prompt; fall behind and prompts wait until you catch up.`
+            : 'Coach is easy. Same schedule on the band, nudges only, nothing held.',
         }
       }
       case 'hide':
@@ -413,39 +393,27 @@ export const register: Register = (on, options) => {
         return { text: 'Terminal Gym panels closed.' }
       case 'status': {
         const t = await refreshToday($)
-        const owed = await read($, debt)
         const shown = withStreak(t, await refreshHistory($))
-        return { text: owed > 0 ? `${shown} · debt ${owed} left` : shown }
+        return { text: `${shown}${paceText(await refreshPace($), isStrict)}` }
       }
     }
   })
 
   on('prompt.submit', async ($, e, next) => {
-    const isGated = isStrict && e.origin.kind === 'composer' && !e.text.trimStart().startsWith('/')
-    const owed = isGated ? await read($, debt) : 0
+    // Only prompts the person typed count: background tasks, loops and other
+    // sessions start turns too. Slash commands (like /fit 10) always pass.
+    const isTyped = e.origin.kind === 'composer' && !e.text.trimStart().startsWith('/')
+    if (!isTyped) return next(e)
+    await startDay($)
+    const p = await refreshPace($)
     const t = await read($, today)
-    // Rest days owe nothing; clear anything left from earlier in the day.
-    if (owed > 0 && t?.isRest === true) {
-      await setDebt($, 0)
-      return next(e)
-    }
-    if (owed > 0) {
-      // Any paid reps unlock the next prompt, plus every prompt for two minutes after.
-      if (!(await syncUnlocked($))) {
-        void $.prompt.fill({ text: e.text })
-        return {
-          drop: `Pay up first: ${owed} ${t?.exercise ?? 'reps'}. Log any reps (/fit 5) to unlock your next prompt + 2 min. /fit rest skips the day (breaks streak).`,
-        }
+    if (isStrict && p !== null && p.behind > 0) {
+      void $.prompt.fill({ text: e.text })
+      return {
+        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
       }
-      await $.store.set('hasPass', false)
-      await syncUnlocked($)
     }
-    // Only prompts the person typed cost reps: background tasks, loops and
-    // other sessions start turns too, and those are not theirs to pay for.
-    // Charged after next(e), so a prompt refused further down costs nothing.
-    const entered = await next(e)
-    if (isGated && entered.drop === undefined) await chargeTurn($, nudgeReps)
-    return entered
+    return next(e)
   })
 
   on('turn.start', async ($, e, next) => {
@@ -460,6 +428,7 @@ export const register: Register = (on, options) => {
       timer = undefined
       await update($, isWaiting, () => false)
       await refreshToday($)
+      await refreshPace($)
     }
     return next(e)
   })
@@ -538,12 +507,10 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const owed = await read($, debt)
     const days = await read($, history)
     const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
-    const debtText = owed > 0 ? `  debt ${owed} left · ${(await read($, isUnlocked)) ? 'prompts open' : 'pay to unlock'}` : ''
-    const progress = `${line(t)}${debtText}`
+    const progress = `${line(t)}${paceText(await read($, pace), isStrict)}`
     const run = streak(days)
     const streakText = run > 0 ? `  🔥${run}d` : ''
     const LOG_LABEL = 'log reps: '

@@ -21,12 +21,19 @@ export type OnboardPick = {
   hasRoutine: boolean
 }
 
+// Where today stands against the schedule of sets.
+export type Pace = {
+  required: number
+  behind: number
+  setSize: number
+  nextDueAt: number | null
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'terminal-gym': {
       today: Today | null
-      debt: number
-      isUnlocked: boolean
+      pace: Pace | null
       isWaiting: boolean
       isIntroduced: boolean
       onboardStep: number
