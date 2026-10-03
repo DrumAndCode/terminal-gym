@@ -207,17 +207,22 @@ const breakOver = async ($: $) => {
   }
 }
 
-const nudge = async ($: $, reps: number, isStrict: boolean) => {
+// Easy mode: a suggestion once a turn runs long.
+const nudge = async ($: $, reps: number) => {
   const t = await read($, today)
   if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
   await update($, isWaiting, () => true)
-  if (isStrict) {
-    const owed = (await read($, debt)) + reps
-    await setDebt($, owed)
-    toast($, `Your agent's mid-set. +${reps} ${t.exercise} added · debt ${owed} left.`)
-  } else {
-    toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
-  }
+  toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
+}
+
+// Strict mode: every turn costs reps, from the moment Claude starts.
+const chargeTurn = async ($: $, reps: number) => {
+  const t = await read($, today)
+  if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
+  await update($, isWaiting, () => true)
+  const owed = (await read($, debt)) + reps
+  await setDebt($, owed)
+  toast($, `Your agent's mid-set. +${reps} ${t.exercise} added · debt ${owed} left.`)
 }
 
 const endRest = async ($: $) => {
@@ -438,10 +443,10 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('turn.start', ($, e, next) => {
+  on('turn.start', async ($, e, next) => {
     timer?.cancel()
-    if (options.nudges === false) return next(e)
-    timer = $.clock.after(nudgeMs, () => void nudge($, nudgeReps, isStrict))
+    if (isStrict) await chargeTurn($, nudgeReps)
+    else if (options.nudges !== false) timer = $.clock.after(nudgeMs, () => void nudge($, nudgeReps))
     return next(e)
   })
 

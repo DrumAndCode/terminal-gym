@@ -701,3 +701,20 @@ test('/clear and /resume run the setup again', async ($, on) => {
   await $.classic.SessionStart({ source: 'compact' })
   expect(registered).toEqual(['fit', 'fit', 'fit'])
 })
+
+test('strict mode charges every turn, however short', { options: { strict: true } }, async ($, on) => {
+  world(on)
+  await start($)
+  await $.turn.start({ text: 'quick one', turnId: 't1' })
+  const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+  expect(held.drop).toContain('10 pushups')
+})
+
+test('easy mode still waits for a long turn before nudging', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await start($)
+  await $.turn.start({ text: 'quick one', turnId: 't1' })
+  expect(toasts.some(t => t.includes('mid-set'))).toBe(false)
+  await clock.advance(31_000)
+  expect(toasts.some(t => t.includes('You next: 10 pushups'))).toBe(true)
+})

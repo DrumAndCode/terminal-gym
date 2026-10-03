@@ -28,7 +28,7 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Long turns add rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
+      "description": "Every turn adds rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
       "default": false
     },
     "nudgeSeconds": {
@@ -40,7 +40,7 @@
     "nudgeReps": {
       "type": "number",
       "title": "Reps per nudge",
-      "description": "Reps suggested (and owed, in strict mode) per long turn.",
+      "description": "Reps suggested per long turn, or owed per turn in strict mode.",
       "default": 10
     },
     "spinner": {
