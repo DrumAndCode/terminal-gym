@@ -7,8 +7,8 @@ A Claude Code mod for a daily bodyweight rep goal. When Claude runs a long turn,
 ## What it does
 
 - **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`, grey at 0 then red, yellow and green as you close in on the goal.
-- **Long-turn nudges**: after 45s of Claude working, a toast and the spinner suggest a set.
-- **Strict mode** (opt-in): long turns add rep debt; your next prompt waits until it's paid.
+- **Long-turn nudges**: after 30s of Claude working, a toast and the spinner suggest a set.
+- **Strict mode** (opt-in): long turns add rep debt; your next prompt waits until you pay. Any reps unlock a minute of prompts; the rest comes due after.
 - **Scoreboard** (`/fit score`): a barbell, your streak and a 28-day grid.
 - **Walkthrough**: three steps on first run to pick a program.
 

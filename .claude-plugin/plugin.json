@@ -28,14 +28,14 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Long turns add rep debt; new prompts are held until it is paid (/fit skip breaks your streak instead).",
+      "description": "Long turns add rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
       "default": false
     },
     "nudgeSeconds": {
       "type": "number",
       "title": "Nudge after (seconds)",
       "description": "How long a turn runs before Terminal Gym suggests a set.",
-      "default": 45
+      "default": 30
     },
     "nudgeReps": {
       "type": "number",

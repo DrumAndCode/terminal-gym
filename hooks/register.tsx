@@ -31,6 +31,7 @@ const PANE = 'gym-week'
 const HELP_PANE = 'gym-help'
 const ONBOARD_PANE = 'gym-onboard'
 const HISTORY_DAYS = 28
+const GRACE_MS = 60_000
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
 const debt = atom({ plugin: 'terminal-gym', key: 'debt' } as const, 0)
@@ -140,7 +141,11 @@ const logReps = async ($: $, change: (count: number) => number) => {
   )
 
   const added = count - before.count
-  if (added > 0) await setDebt($, Math.max(0, (await read($, debt)) - added))
+  const owed = await read($, debt)
+  if (added > 0 && owed > 0) {
+    await setDebt($, Math.max(0, owed - added))
+    await $.store.set('paidAt', await $.clock.now())
+  }
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     $.ui.toast(`✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
@@ -214,7 +219,7 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
 
 export const register: Register = (on, options) => {
   const isStrict = options.strict === true
-  const nudgeMs = Number(options.nudgeSeconds ?? 45) * 1000
+  const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
   const nudgeReps = Number(options.nudgeReps ?? 10)
   let timer: { cancel: () => void } | undefined
 
@@ -314,11 +319,13 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const isGated = isStrict && e.origin.kind === 'composer' && !e.text.trimStart().startsWith('/')
     const owed = isGated ? await read($, debt) : 0
-    if (owed > 0) {
+    // Any set of paid reps buys a minute of prompts; the rest comes due after.
+    const paidAt = Number((await $.store.get('paidAt')) ?? 0)
+    if (owed > 0 && (await $.clock.now()) - paidAt >= GRACE_MS) {
       const t = await read($, today)
       void $.prompt.fill({ text: e.text })
       return {
-        drop: `Pay up first: ${owed} ${t?.exercise ?? 'reps'}. /fit ${owed} to log, /fit rest to bail (breaks streak).`,
+        drop: `Pay up first: ${owed} ${t?.exercise ?? 'reps'}. Any reps buy a minute. /fit rest to bail (breaks streak).`,
       }
     }
     return next(e)

@@ -129,7 +129,7 @@ describe('nudges', () => {
     const { clock, toasts } = world(on)
     await start($)
     await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(46_000)
+    await clock.advance(31_000)
     expect(toasts.some(t => t.includes("You next: 10 pushups."))).toBe(true)
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
     expect(submitted.drop).toBeUndefined()
@@ -139,7 +139,7 @@ describe('nudges', () => {
     const { clock, files } = world(on)
     await start($)
     await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(46_000)
+    await clock.advance(31_000)
 
     const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
     expect(held.drop).toContain('Pay up first: 10 pushups')
@@ -150,11 +150,32 @@ describe('nudges', () => {
     expect(files.get(`${LOG}/2026-10-05`)).toBe('10\n')
   })
 
+  test('any payment buys a minute of prompts, then the rest is due', { options: { strict: true } }, async ($, on) => {
+    const { clock } = world(on)
+    await start($)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(31_000)
+    await $.turn.start({ text: 'go', turnId: 't2' })
+    await clock.advance(31_000)
+
+    await fit($, '5')
+    const paid = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(paid.drop).toBeUndefined()
+
+    await clock.advance(59_000)
+    const still = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(still.drop).toBeUndefined()
+
+    await clock.advance(2_000)
+    const due = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(due.drop).toContain('Pay up first: 15 pushups')
+  })
+
   test('/fit rest clears the debt and marks the day', { options: { strict: true } }, async ($, on) => {
     const { clock, files } = world(on)
     await start($)
     await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(46_000)
+    await clock.advance(31_000)
     await fit($, 'rest')
     expect(files.has(`${LOG}/2026-10-05.skip`)).toBe(true)
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
@@ -165,7 +186,7 @@ describe('nudges', () => {
     const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05`, '100\n']]))
     await start($)
     await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(46_000)
+    await clock.advance(31_000)
     expect(toasts.some(t => t.includes("mid-set"))).toBe(false)
   })
 })
@@ -242,7 +263,7 @@ describe('drawing', () => {
       props: { word: 'Sauteing', message: null, suffix: '…', mode: 'responding' },
     } as const
     await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(46_000)
+    await clock.advance(31_000)
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...spinner })
     expect(await ui.find({ type: 'Text', text: /10 pushups while Claude works/ })).toBeDefined()
     await ui.unmount()
