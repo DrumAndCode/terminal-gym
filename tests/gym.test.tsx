@@ -383,6 +383,7 @@ describe('swap', () => {
 describe('swap edge cases', () => {
   test('multi-word names, empty routines and same-exercise swaps', async ($, on) => {
     expect(parseFit('swap jumping jacks')).toEqual({ kind: 'swap', exercise: 'jumping jacks' })
+    expect(parseFit('swap Jumping   Jacks')).toEqual({ kind: 'swap', exercise: 'jumping jacks' })
     expect(pickSwap({}, 'pushups')).toBeUndefined()
     const { files } = world(on, new Map([[`${HOME}/.claude/fitness/routine.json`, JSON.stringify({ mon: { exercise: 'jumping jacks', goal: 50 }, tue: { exercise: 'dips', goal: 100 } })]]))
     await start($)

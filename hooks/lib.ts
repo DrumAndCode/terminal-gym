@@ -61,7 +61,7 @@ export const parseFit = (args: string): FitCommand => {
   if (head === 'program') return { kind: 'program' }
   if (head === 'swap') {
     // Names may be several words ("jumping jacks"): keep everything after "swap".
-    const name = args.trim().replace(/^swap\s*/, '').toLowerCase()
+    const name = args.trim().replace(/^swap\s*/, '').replace(/\s+/g, ' ').toLowerCase()
     return name === '' ? { kind: 'swap' } : { kind: 'swap', exercise: name }
   }
   if (head === 'rules') return { kind: 'help' }

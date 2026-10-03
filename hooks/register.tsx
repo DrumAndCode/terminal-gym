@@ -268,7 +268,8 @@ export const register: Register = (on, options) => {
         if (plan.exercise === before.exercise) return { text: `Already on ${plan.exercise} today.` }
         await $.fs.write(`${logDir}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
         await refreshHistory($)
-        const carried = before.count > 0 ? ` Your ${before.count} reps carry over.` : ''
+        const amount = before.unit === '' ? `${before.count} reps` : `${before.count}${before.unit}`
+        const carried = before.count > 0 ? ` Your ${amount} carry over.` : ''
         return { text: `Swapped to ${plan.exercise} today.${carried} ${line(await refreshToday($))}` }
       }
       case 'program':

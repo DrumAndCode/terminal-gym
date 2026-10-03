@@ -53,7 +53,7 @@ Settings live in `/config` under terminal-gym: nudges, strict mode, nudge delay,
 
 ## Privacy
 
-Nothing leaves your machine. The mod makes no network calls, sends nothing to the model, and keeps everything in `~/.claude/fitness`:
+The mod makes no network calls and adds no hidden context for the model. `/fit` replies appear in your conversation like any slash command's output, so Claude can see them. Everything else stays in `~/.claude/fitness`:
 
 - `routine.json`: the plan per weekday (`{ "mon": { "exercise": "pushups", "goal": 100 } }`, optional `"unit": "s"`).
 - `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day.
