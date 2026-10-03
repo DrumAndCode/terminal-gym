@@ -1,0 +1,47 @@
+{
+  "name": "terminal-gym",
+  "version": "0.1.0",
+  "description": "Claude Gym: a daily rep goal inside Claude Code. log with /fit, quick-log band, long-turn nudges, week heatmap, optional strict mode.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "nudges": {
+      "type": "boolean",
+      "title": "Long-turn nudges",
+      "description": "Suggest a set when a turn runs long.",
+      "default": true
+    },
+    "strict": {
+      "type": "boolean",
+      "title": "Strict mode",
+      "description": "Long turns add rep debt; new prompts are held until it is paid (/fit skip breaks your streak instead).",
+      "default": false
+    },
+    "nudgeSeconds": {
+      "type": "number",
+      "title": "Nudge after (seconds)",
+      "description": "How long a turn runs before Claude Gym suggests a set.",
+      "default": 45
+    },
+    "nudgeReps": {
+      "type": "number",
+      "title": "Reps per nudge",
+      "description": "Reps suggested (and owed, in strict mode) per long turn.",
+      "default": 10
+    },
+    "spinner": {
+      "type": "boolean",
+      "title": "Spinner takeover",
+      "description": "Replace the spinner word with the suggested set during long turns.",
+      "default": true
+    },
+    "band": {
+      "type": "boolean",
+      "title": "Quick-log band",
+      "description": "Show progress and +5/+10/+25 buttons above the prompt.",
+      "default": true
+    }
+  },
+  "author": {
+    "name": "Naitik Mehta"
+  }
+}

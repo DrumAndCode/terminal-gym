@@ -1,0 +1,356 @@
+import { describe, expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+import type { On } from 'claude-code'
+
+import { parseCustom, parseFit, progressColor, scale, streak } from '../hooks/lib'
+
+const HOME = '/home/t'
+const LOG = `${HOME}/.claude/fitness/log`
+const MONDAY_9AM = new Date(2026, 9, 5, 9).getTime()
+
+// The world beneath Claude Gym: files in memory, a held clock, and the engine
+// calls it makes answered quietly, toasts recorded.
+const world = (on: On, files = new Map<string, string>(), { introduced = true } = {}) => {
+  const clock = mock.clock(on, { now: MONDAY_9AM })
+  mock.store(on, introduced ? { introduced: true } : {})
+  mock.env(on, { HOME })
+  const toasts: string[] = []
+  on('fs.read', ($, e) => {
+    const text = files.get(e.path)
+    if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+    return { value: text }
+  })
+  on('fs.write', ($, e) => {
+    files.set(e.path, e.text)
+    return { value: undefined }
+  })
+  on('fs.exists', ($, e) => ({ value: files.has(e.path) }))
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  const config = new Map<string, unknown>()
+  on('config.set', ($, e) => {
+    config.set(e.key, e.value)
+    return { value: e.value }
+  })
+  const open = new Set<string>()
+  on('ui.open', ($, e) => {
+    open.add(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', ($, e) => {
+    open.delete(e.id)
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
+  on('prompt.fill', () => ({ isFilled: true }))
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  return { clock, files, toasts, open, config }
+}
+
+const fit = ($: Engine, args: string) =>
+  $.command.run({
+    command: 'fit',
+    args,
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
+
+const start = ($: Engine) =>
+  $.session.start({ cwd: HOME, surface: 'terminal', isInteractive: true })
+
+describe('lib', () => {
+  test('parses /fit arguments', async () => {
+    expect(parseFit('')).toEqual({ kind: 'status' })
+    expect(parseFit('20')).toEqual({ kind: 'add', n: 20 })
+    expect(parseFit('-5')).toEqual({ kind: 'add', n: -5 })
+    expect(parseFit('set 80')).toEqual({ kind: 'set', n: 80 })
+    expect(parseFit('set x').kind).toBe('error')
+    expect(parseFit('dance').kind).toBe('error')
+    expect(parseFit('coach strict')).toEqual({ kind: 'strict', isOn: true })
+    expect(parseFit('reset')).toEqual({ kind: 'reset' })
+    expect(parseFit('tour')).toEqual({ kind: 'intro' })
+    expect(parseFit('coach maybe').kind).toBe('error')
+  })
+
+  test('streak counts finished days and forgives an unfinished today', async () => {
+    const day = (count: number, isSkipped = false) => ({ date: 'd', count, goal: 100, isSkipped })
+    expect(streak([day(0), day(100), day(120), day(40)])).toBe(2)
+    expect(streak([day(100), day(100, true), day(100)])).toBe(1)
+  })
+})
+
+describe('setup helpers', () => {
+  test('custom routines, scaling and colors', async () => {
+    expect(parseCustom('30 burpees')?.mon).toEqual({ exercise: 'burpees', goal: 30 })
+    expect(parseCustom('burpees')).toBeUndefined()
+    expect(scale({ mon: { exercise: 'dips', goal: 100 } }, 0.5).mon?.goal).toBe(50)
+    expect(progressColor(0, 100)).toBeUndefined()
+    expect(progressColor(40, 100)).toBe('#d7af5f')
+    expect(progressColor(100, 100)).toBe('#87af87')
+  })
+})
+
+describe('logging', () => {
+  test('/fit adds reps to the shared log file and seeds a routine', async ($, on) => {
+    const { files, toasts } = world(on)
+    await start($)
+    const ran = await fit($, '60')
+    expect(ran.text).toContain('60/100 pushups')
+    expect(files.get(`${LOG}/2026-10-05`)).toBe('60\n')
+    expect(files.has(`${HOME}/.claude/fitness/routine.json`)).toBe(true)
+
+    await fit($, '40')
+    expect(files.get(`${LOG}/2026-10-05`)).toBe('100\n')
+    expect(toasts.some(t => t.includes('done for today'))).toBe(true)
+  })
+
+  test('/fit reads counts the shell script already wrote', async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-05`, '30\n']]))
+    await start($)
+    const ran = await fit($, '')
+    expect(ran.text).toContain('30/100 pushups')
+  })
+})
+
+describe('nudges', () => {
+  test('a long turn nudges without blocking when strict is off', async ($, on) => {
+    const { clock, toasts } = world(on)
+    await start($)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(46_000)
+    expect(toasts.some(t => t.includes("Your set: 10 pushups."))).toBe(true)
+    const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(submitted.drop).toBeUndefined()
+  })
+
+  test('strict mode holds prompts until the debt is paid', { options: { strict: true } }, async ($, on) => {
+    const { clock, files } = world(on)
+    await start($)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(46_000)
+
+    const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(held.drop).toContain('Pay up first: 10 pushups')
+
+    await fit($, '10')
+    const let_through = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(let_through.drop).toBeUndefined()
+    expect(files.get(`${LOG}/2026-10-05`)).toBe('10\n')
+  })
+
+  test('/fit rest clears the debt and marks the day', { options: { strict: true } }, async ($, on) => {
+    const { clock, files } = world(on)
+    await start($)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(46_000)
+    await fit($, 'rest')
+    expect(files.has(`${LOG}/2026-10-05.skip`)).toBe(true)
+    const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(submitted.drop).toBeUndefined()
+  })
+
+  test('no nudge once the goal is met', async ($, on) => {
+    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05`, '100\n']]))
+    await start($)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(46_000)
+    expect(toasts.some(t => t.includes("Your set"))).toBe(false)
+  })
+})
+
+const BAND = {
+  component: 'AbovePrompt',
+  props: {
+    hasSurvey: false,
+    isWorking: false,
+    maxRows: 6,
+    bodyColumns: 100,
+    scroll: { offset: 0, bodyRows: 6 },
+    view: {},
+  },
+} as const
+
+const PANE = {
+  component: 'Pane',
+  requestId: 'gym-week',
+  props: {
+    title: 'Claude Gym',
+    isFocused: false,
+    bodyColumns: 40,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 20 },
+    view: {},
+  },
+} as const
+
+describe('drawing', () => {
+  test('the band shows progress and its buttons log reps', async ($, on) => {
+    const { files } = world(on)
+    await start($)
+    let total = 0
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: `${total}/100 pushups` })).toBeDefined()
+      await ui.press({ key: 'add10' })
+      await ui.press({ key: 'add25' })
+      total += 35
+      expect(files.get(`${LOG}/2026-10-05`)).toBe(`${total}\n`)
+      expect(await ui.find({ type: 'Text', text: `${total}/100 pushups` })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the week pane shows the streak on every surface', async ($, on) => {
+    world(
+      on,
+      new Map([
+        [`${LOG}/2026-10-03`, '300\n'],
+        [`${LOG}/2026-10-04`, '100\n'],
+      ]),
+    )
+    await start($)
+    await fit($, 'score')
+    for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+      const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...PANE })
+      expect(await ui.find({ type: 'Text', text: /2-day streak/ })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the spinner names the set during a long turn', async ($, on) => {
+    const { clock } = world(on)
+    on('ui.render', { component: 'Spinner' }, ($, e) => {
+      const { Text } = $.ui.resolve(e)
+      return <Text>{e.props.message ?? e.props.word}</Text>
+    })
+    await start($)
+    const spinner = {
+      component: 'Spinner',
+      props: { word: 'Sauteing', message: null, suffix: '…', mode: 'responding' },
+    } as const
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(46_000)
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...spinner })
+    expect(await ui.find({ type: 'Text', text: /10 pushups while Claude works/ })).toBeDefined()
+    await ui.unmount()
+  })
+})
+
+describe('first run', () => {
+  test('the band introduces Claude Gym until set up or dismissed', async ($, on) => {
+    world(on, new Map(), { introduced: false })
+    await start($)
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /you're up next/ })).toBeDefined()
+    await ui.press({ key: 'dismiss' })
+    expect(await ui.find({ type: 'Text', text: /0\/100 pushups/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('/fit rules opens a help pane with its own close button', async ($, on) => {
+    const { open } = world(on)
+    await start($)
+    await fit($, 'rules')
+    expect(open.has('gym-help')).toBe(true)
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, requestId: 'gym-help' })
+    expect(await ui.find({ type: 'Markdown', text: /House rules/ })).toBeDefined()
+    await ui.press({ key: 'close' })
+    expect(open.has('gym-help')).toBe(false)
+  })
+
+  test('/fit score toggles the pane', async ($, on) => {
+    const { open } = world(on)
+    await start($)
+    await fit($, 'score')
+    expect(open.has('gym-week')).toBe(true)
+    const again = await fit($, 'score')
+    expect(again.text).toContain('closed')
+    expect(open.has('gym-week')).toBe(false)
+  })
+})
+
+describe('strict command', () => {
+  test('/fit coach strict flips the setting', async ($, on) => {
+    const { config } = world(on)
+    await start($)
+    const ran = await fit($, 'coach strict')
+    expect(ran.text).toContain('Coach is strict')
+    expect(config.get('terminal-gym.strict')).toBe(true)
+  })
+})
+
+const ONBOARD = {
+  component: 'Pane',
+  requestId: 'gym-onboard',
+  props: { ...PANE.props, title: 'Claude Gym' },
+} as const
+
+describe('walkthrough', () => {
+  test('three steps, back and next, then a saved program and a streak', async ($, on) => {
+    const { files, open } = world(
+      on,
+      new Map([
+        [`${LOG}/2026-10-03`, '400\n'],
+        [`${LOG}/2026-10-04`, '400\n'],
+      ]),
+      { introduced: false },
+    )
+    await start($)
+    const band = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    await band.press({ key: 'setup' })
+    expect(open.has('gym-onboard')).toBe(true)
+
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...ONBOARD })
+    expect(await ui.find({ type: 'Text', text: /Step 1 of 3/ })).toBeDefined()
+    expect(await ui.find({ key: 'back' })).toBeUndefined()
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /Pick your program/ })).toBeDefined()
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /Step 1 of 3/ })).toBeDefined()
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'program-2' })
+    await ui.press({ key: 'size-Heavy' })
+    expect(await ui.find({ type: 'Text', text: '400 squats' })).toBeDefined()
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /🔥3d/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /fit score/ })).toBeDefined()
+    await ui.press({ key: 'finish' })
+    await ui.unmount()
+
+    expect(JSON.parse(files.get(`${HOME}/.claude/fitness/routine.json`) ?? '{}').mon).toEqual({ exercise: 'squats', goal: 400 })
+    expect(open.has('gym-onboard')).toBe(false)
+    expect(await band.find({ type: 'Text', text: /0\/400 squats  🔥2d/ })).toBeDefined()
+    await band.unmount()
+  })
+
+  test('/fit reset puts today back to zero', async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-05`, '70\n']]))
+    await start($)
+    const ran = await fit($, 'reset')
+    expect(ran.text).toContain('0/100 pushups')
+    expect(files.get(`${LOG}/2026-10-05`)).toBe('0\n')
+  })
+})
+
+test('/fit tour brings the welcome band back', async ($, on) => {
+  world(on)
+  await start($)
+  await fit($, 'tour')
+  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: /you're up next/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/fit program opens the walkthrough', async ($, on) => {
+  const { open } = world(on)
+  await start($)
+  const ran = await fit($, 'program')
+  expect(ran.text).toContain('Pick your program')
+  expect(open.has('gym-onboard')).toBe(true)
+})
