@@ -479,3 +479,12 @@ test('the band wordmark is a mini barbell', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: 'TERMINAL GYM' })).toBeDefined()
   await ui.unmount()
 })
+
+test('below the wordmark width the band shows the bare name', async ($, on) => {
+  world(on, new Map(), { introduced: false })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns: 20 } })
+  expect(await ui.find({ type: 'Text', text: '▐█▌' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'TERMINAL GYM' })).toBeDefined()
+  await ui.unmount()
+})

@@ -373,12 +373,18 @@ export const register: Register = (on, options) => {
       )
       const header = (
         <Box key="header" flexDirection={cols >= HEADER_WIDTH ? 'row' : 'column'}>
-          <Box>
-            <Text color="#d7af5f">{MINI_BARBELL.left}</Text>
-            <Text bold>{MINI_BARBELL.name}</Text>
-            <Text color="#d7af5f">{MINI_BARBELL.right}</Text>
-            <Text>  </Text>
-          </Box>
+          {cols >= cells(WORDMARK) ? (
+            <Box>
+              <Text color="#d7af5f">{MINI_BARBELL.left}</Text>
+              <Text bold>{MINI_BARBELL.name}</Text>
+              <Text color="#d7af5f">{MINI_BARBELL.right}</Text>
+              <Text>  </Text>
+            </Box>
+          ) : (
+            <Text bold wrap="truncate-end">
+              {MINI_BARBELL.name}
+            </Text>
+          )}
           <Text dimColor wrap="truncate-end">{TAGLINE}</Text>
         </Box>
       )
