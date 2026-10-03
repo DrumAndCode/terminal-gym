@@ -1,7 +1,7 @@
 {
   "name": "terminal-gym",
   "displayName": "Terminal Gym",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A daily bodyweight rep goal inside Claude Code: log with /fit, quick-log band, long-turn nudges, streaks and a score grid, optional strict mode.",
   "author": {
     "name": "Naitik Mehta",

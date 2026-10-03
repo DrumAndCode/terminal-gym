@@ -11,6 +11,7 @@ export type Day = {
   date: string
   count: number
   goal: number
+  exercise: string
   isSkipped: boolean
 }
 
