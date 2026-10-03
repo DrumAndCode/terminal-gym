@@ -391,9 +391,10 @@ export const register: Register = (on, options) => {
     const week = days.slice(-7)
 
     const { Box, Text } = $.ui.resolve(e)
-    // Too narrow for the bar: the name alone.
+    // The bar needs a monospace grid of BARBELL.width cells: the terminal's.
+    // Elsewhere, or too narrow, the name alone.
     const barbell =
-      e.props.bodyColumns >= BARBELL.width ? (
+      e.surface === 'terminal' && e.props.bodyColumns >= BARBELL.width ? (
         <Box flexDirection="column">
           <Text color="#d7af5f">{BARBELL.plates}</Text>
           <Box>

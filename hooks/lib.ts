@@ -171,7 +171,7 @@ export const pickSwap = (routine: Routine, current: string, wanted?: string) => 
 
 // The scoreboard's barbell, the name across the bar. 34 columns wide.
 export const BARBELL = {
-  plates: ' ▐█▌▐█▌                    ▐█▌▐█▌',
+  plates: ' ▐█▌▐█▌                    ▐█▌▐█▌ ',
   left: '━▐█▌▐█▌━━━ ',
   name: 'TERMINAL GYM',
   right: ' ━━━▐█▌▐█▌━',

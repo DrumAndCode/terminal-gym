@@ -419,3 +419,15 @@ test('the scoreboard draws the barbell when it fits and the name alone when narr
   expect(await narrow.find({ type: 'Text', text: 'TERMINAL GYM' })).toBeDefined()
   await narrow.unmount()
 })
+
+test('the barbell is terminal-only; other surfaces show the name', async ($, on) => {
+  world(on)
+  await start($)
+  await fit($, 'score')
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...PANE })
+    expect(await ui.find({ type: 'Text', text: '▐█▌' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'TERMINAL GYM' })).toBeDefined()
+    await ui.unmount()
+  }
+})
