@@ -129,10 +129,13 @@ export const heatCells = (history: readonly Day[]) => {
   return { columns, rows: weeks, cells: (new Uint8Array(words.buffer) as Base64Bytes).toBase64() }
 }
 
-// Muted traffic light: red under a third of the goal, yellow on the way, green done.
-// No goal means no judgement: undefined draws dim.
-export const progressColor = (count: number, goal: number) =>
-  goal <= 0 ? undefined : count >= goal ? '#87af87' : count / goal >= 1 / 3 ? '#d7af5f' : '#d75f5f'
+// Grey until the first rep, then a muted traffic light: red under a third of the
+// goal, yellow on the way, green for the last fifth. No goal: undefined draws dim.
+export const progressColor = (count: number, goal: number) => {
+  if (goal <= 0 || count <= 0) return undefined
+  const share = count / goal
+  return share >= 0.8 ? '#87af87' : share >= 1 / 3 ? '#d7af5f' : '#d75f5f'
+}
 
 export const daily = (exercise: string, goal: number): Routine =>
   Object.fromEntries(WEEKDAYS.map(day => [day, { exercise, goal }]))
