@@ -37,7 +37,11 @@ const world = (
     toasts.push(e.text)
     return { value: undefined }
   })
-  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  const registered: string[] = []
+  on('command.register', ($, e) => {
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
   const config = new Map<string, unknown>()
   on('config.set', ($, e) => {
     config.set(e.key, e.value)
@@ -59,7 +63,7 @@ const world = (
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  return { clock, files, toasts, open, config, calls }
+  return { clock, files, toasts, open, config, calls, registered }
 }
 
 const fit = ($: Engine, args: string) =>
@@ -683,4 +687,15 @@ test('score rows name each day\'s exercise', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /10-03  300\/300  squats/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /10-05  15\/100   pushups/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('/clear runs the setup again', async ($, on) => {
+  on('classic.SessionStart', () => ({}))
+  const { registered } = world(on)
+  await start($)
+  expect(registered).toEqual(['fit'])
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(registered).toEqual(['fit', 'fit'])
+  await $.classic.SessionStart({ source: 'compact' })
+  expect(registered).toEqual(['fit', 'fit'])
 })

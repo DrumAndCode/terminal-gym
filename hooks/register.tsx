@@ -286,6 +286,29 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
   isSkipped: false,
 }))
 
+// Everything a conversation needs: the /fit command and today's state.
+const boot = async ($: $, isStrict: boolean) => {
+  await $.command.register({
+    name: 'fit',
+    description: "Log reps toward today's goal",
+    argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
+    immediate: true,
+  })
+  const stored = Number((await $.store.get('debt')) ?? 0)
+  await update($, debt, () => (isStrict ? stored : 0))
+  await syncUnlocked($)
+  // A restart mid-break loses the timer: start one for whatever's left of it.
+  const breakLeft = Number((await $.store.get('paidAt')) ?? 0) + GRACE_MS - (await $.clock.now())
+  if (breakLeft > 0) {
+    breakTimer?.cancel()
+    breakTimer = $.clock.after(breakLeft, () => void breakOver($))
+  }
+  const introduced = (await $.store.get('introduced')) === true
+  await update($, isIntroduced, () => introduced)
+  await refreshToday($)
+  await refreshHistory($)
+}
+
 export const register: Register = (on, options) => {
   const isStrict = options.strict === true
   const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
@@ -293,25 +316,14 @@ export const register: Register = (on, options) => {
   let timer: { cancel: () => void } | undefined
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'fit',
-      description: "Log reps toward today's goal",
-      argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
-      immediate: true,
-    })
-    const stored = Number((await $.store.get('debt')) ?? 0)
-    await update($, debt, () => (isStrict ? stored : 0))
-    await syncUnlocked($)
-    // A restart mid-break loses the timer: start one for whatever's left of it.
-    const breakLeft = Number((await $.store.get('paidAt')) ?? 0) + GRACE_MS - (await $.clock.now())
-    if (breakLeft > 0) {
-      breakTimer?.cancel()
-      breakTimer = $.clock.after(breakLeft, () => void breakOver($))
-    }
-    const introduced = (await $.store.get('introduced')) === true
-    await update($, isIntroduced, () => introduced)
-    await refreshToday($)
-    await refreshHistory($)
+    await boot($, isStrict)
+    return next(e)
+  })
+
+  // /clear starts a new conversation in the same process without another
+  // session.start, so the setup above runs again here.
+  on('classic.SessionStart', async ($, e, next) => {
+    if (e.source === 'clear') await boot($, isStrict)
     return next(e)
   })
 
