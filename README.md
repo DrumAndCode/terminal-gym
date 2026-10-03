@@ -13,7 +13,7 @@ Start a new Claude Code session and the welcome band appears above your prompt.
 ![The Terminal Gym band above the Claude Code prompt: 0/100 pushups, behind 10, with +5, +10 and +25 buttons](docs/band.png)
 
 ## Demo (40 seconds)
-https://github.com/user-attachments/assets/b82aedd9-2b03-4071-b24e-37bb76e69ce0
+https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 
 ## What you get
 
