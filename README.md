@@ -10,6 +10,28 @@ A Claude Code mod for a daily rep goal. Claude lifts the code, you lift the weig
 - **Scoreboard**: streak plus a 28-day grid.
 - **Walkthrough**: three steps on first run to pick a program.
 
+## Install
+
+Requires Claude Code 2.1.288 or newer (mods are early access).
+
+```sh
+git clone https://github.com/DrumAndCode/terminal-gym.git ~/terminal-gym
+```
+
+Load it for one session:
+
+```sh
+claude --plugin-dir ~/terminal-gym
+```
+
+Or load it in every session by adding the folder to `~/.claude/settings.json`:
+
+```json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/Users/you/terminal-gym" } }
+```
+
+Restart Claude Code (a new process, not a resumed chat), and the welcome band shows above your prompt.
+
 ## Commands
 
 | Command | Does |
@@ -29,15 +51,17 @@ A Claude Code mod for a daily rep goal. Claude lifts the code, you lift the weig
 
 Settings live in `/config` under terminal-gym: nudges, strict mode, nudge delay, reps per nudge, spinner takeover, band.
 
-## Data
+## Privacy
 
-Local only, in `~/.claude/fitness`:
+Nothing leaves your machine. The mod makes no network calls, sends nothing to the model, and keeps everything in `~/.claude/fitness`:
 
 - `routine.json`: the plan per weekday (`{ "mon": { "exercise": "pushups", "goal": 100 } }`, optional `"unit": "s"`).
 - `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day.
 - `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap` (JSON plan, same shape as a routine day).
 
-## Develop
+## Contributing
+
+Issues and PRs welcome. Keep changes small and include a test.
 
 ```sh
 claude --plugin-dir .          # load it for one session
@@ -45,4 +69,10 @@ claude plugin validate .
 claude plugin test .
 ```
 
+`claude plugin test` runs `tests/*.test.tsx` against the engine itself. Once the mod has loaded, `tsc -p .` type-checks it against the engine's types in `.claude-plugin/types/`.
+
 Mods are early access; the API can change between Claude Code releases.
+
+## License
+
+MIT

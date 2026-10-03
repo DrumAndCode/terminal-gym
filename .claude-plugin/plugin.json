@@ -1,7 +1,21 @@
 {
   "name": "terminal-gym",
   "version": "0.1.0",
-  "description": "Claude Gym: a daily rep goal inside Claude Code. log with /fit, quick-log band, long-turn nudges, week heatmap, optional strict mode.",
+  "description": "Claude Gym: a daily rep goal inside Claude Code. Log with /fit, quick-log band, long-turn nudges, streaks and a score grid, optional strict mode.",
+  "author": {
+    "name": "Naitik Mehta",
+    "url": "https://github.com/heyNaitik"
+  },
+  "homepage": "https://github.com/DrumAndCode/terminal-gym",
+  "repository": "https://github.com/DrumAndCode/terminal-gym",
+  "license": "MIT",
+  "keywords": [
+    "fitness",
+    "habit",
+    "streak",
+    "mod",
+    "productivity"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "nudges": {
@@ -40,8 +54,5 @@
       "description": "Show progress and +5/+10/+25 buttons above the prompt.",
       "default": true
     }
-  },
-  "author": {
-    "name": "Naitik Mehta"
   }
 }
