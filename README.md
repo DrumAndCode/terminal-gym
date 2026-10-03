@@ -7,9 +7,9 @@ A Claude Code mod for a daily bodyweight rep goal. When Claude runs a long turn,
 ## What it does
 
 - **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`, grey at 0 then red, yellow and green as you close in on the goal.
-- **Breaks**: 2 minutes after a set, a toast says the break's over and asks for the next one.
-- **Long-turn nudges**: after 30s of Claude working, a toast and the spinner suggest a set.
-- **Strict mode** (opt-in): long turns add rep debt; your next prompt waits until you pay. Logging any reps unlocks your next prompt, plus every prompt for 2 minutes after; whatever's left comes due when the 2 minutes are up.
+- **Set reminders**: a toast tells you when each set comes due, and the band shows `next set 10:53` or `behind 10`.
+- **Long-turn nudges**: after 30s of Claude working, a toast and the spinner suggest a set. Easy mode only.
+- **Strict mode** (opt-in): today's goal is split into sets spread over 8 hours (by default) from your first prompt of the day, with the first set due right away. Prompts before 5am count as the night before. Fall behind and your prompts wait until you catch up, so the work gets spread through the day and done by the end of it.
 - **Scoreboard** (`/fit score`): a barbell, your streak and a 28-day grid.
 - **Walkthrough**: three steps on first run to pick a program.
 
@@ -37,7 +37,7 @@ To hack on it, clone the repo and load it for one session with `claude --plugin-
 | `/fit set 80` | fix today's count |
 | `/fit reset` | today back to 0 |
 | `/fit swap [exercise]` | switch today's exercise (next in your program, or the one named) |
-| `/fit rest` | rest day (breaks streak, clears debt) |
+| `/fit rest` | rest day (breaks streak, no sets due) |
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
 | `/fit score` | streak + grid |
 | `/fit program` | pick your program |
@@ -46,7 +46,7 @@ To hack on it, clone the repo and load it for one session with `claude --plugin-
 | `/fit start` | replay the welcome |
 | `/fit hide` | close panels |
 
-Settings live in `/config` under terminal-gym: nudges, strict mode, nudge delay, reps per nudge, spinner takeover, band.
+Settings live in `/config` under terminal-gym: nudges, strict mode, training window, set size, nudge delay, reps per nudge, spinner takeover, band.
 
 ## Privacy
 

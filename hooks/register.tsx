@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Day, OnboardPick, Today } from '../types'
+import type { Day, OnboardPick, Pace, Today } from '../types'
 import {
   DEFAULT_ROUTINE,
   BARBELL,
@@ -10,9 +10,14 @@ import {
   ROUTINES,
   SIZES,
   bar,
+  clockTime,
+  paceAt,
+  setSizeFor,
   buttonsWidth,
   cells,
   dayKey,
+  fullStreak,
+  isDone,
   describeRoutine,
   heatCells,
   lastDays,
@@ -31,17 +36,19 @@ const PANE = 'gym-week'
 const HELP_PANE = 'gym-help'
 const ONBOARD_PANE = 'gym-onboard'
 const HISTORY_DAYS = 28
-const GRACE_MS = 2 * 60_000
 const TOAST_MS = 10_000
+const HOUR_MS = 60 * 60_000
 
 // Toasts stay up long enough to read mid-set.
 const toast = ($: $, text: string) => $.ui.toast(text, { timeoutMs: TOAST_MS })
 
-let breakTimer: { cancel: () => void } | undefined
+// The pace settings, set from the options each time the module registers.
+const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
+let dueTimer: { cancel: () => void } | undefined
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
-const debt = atom({ plugin: 'terminal-gym', key: 'debt' } as const, 0)
-const isUnlocked = atom({ plugin: 'terminal-gym', key: 'isUnlocked' } as const, false)
+const olderStreak = atom({ plugin: 'terminal-gym', key: 'olderStreak' } as const, 0)
+const pace = atom({ plugin: 'terminal-gym', key: 'pace' } as const, null)
 const isWaiting = atom({ plugin: 'terminal-gym', key: 'isWaiting' } as const, false)
 const history = atom({ plugin: 'terminal-gym', key: 'history' } as const, [])
 const isIntroduced = atom({ plugin: 'terminal-gym', key: 'isIntroduced' } as const, false)
@@ -108,6 +115,48 @@ const refreshToday = async ($: $): Promise<Today> => {
   return next
 }
 
+const DAY_MS = 86_400_000
+
+const readDay = async ($: $, routine: Routine, logDir: string, ms: number): Promise<Day> => {
+  const date = dayKey(ms)
+  const plan = (await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)]
+  return {
+    date,
+    count: await readCount($, `${logDir}/${date}`),
+    goal: plan?.goal ?? 0,
+    exercise: plan?.exercise ?? 'reps',
+    isSkipped: await readRest($, `${logDir}/${date}.skip`),
+  }
+}
+
+// Finished days in a row just before the window, so a streak can outlast it.
+// Cached per window: a full walk once, then one day's step as the window slides.
+const olderRun = async ($: $, days: readonly Day[], routine: Routine, logDir: string) => {
+  const first = days[0]
+  if (first === undefined || !isDone(first)) {
+    await $.store.delete('streakCache')
+    return 0
+  }
+  const oldest = lastDays(await $.clock.now(), HISTORY_DAYS)[0] ?? 0
+  const asOf = dayKey(oldest)
+  const cache = (await $.store.get('streakCache')) as { asOf?: string; older?: number } | undefined
+  let older: number
+  if (cache?.asOf === asOf && typeof cache.older === 'number') {
+    older = cache.older
+  } else if (cache?.asOf === dayKey(oldest - DAY_MS) && typeof cache.older === 'number') {
+    // The window moved on a day: the day that left it joins the older run.
+    older = isDone(await readDay($, routine, logDir, oldest - DAY_MS)) ? cache.older + 1 : 0
+  } else {
+    older = 0
+    for (let back = 1; back <= 366; back++) {
+      if (!isDone(await readDay($, routine, logDir, oldest - back * DAY_MS))) break
+      older++
+    }
+  }
+  await $.store.set('streakCache', { asOf, older })
+  return older
+}
+
 const refreshHistory = async ($: $) => {
   const { routine: routinePath, log: logDir } = await files($)
   const routine = await loadRoutine($, routinePath)
@@ -125,25 +174,67 @@ const refreshHistory = async ($: $) => {
     }),
   )
   await update($, history, () => days)
+  const older = await olderRun($, days, routine, logDir)
+  await update($, olderStreak, () => older)
   return days
 }
 
-const setDebt = async ($: $, n: number) => {
-  await $.store.set('debt', n)
-  // A pass only covers debt that's still owed; never carry one into the next debt.
-  if (n === 0) await $.store.set('hasPass', false)
-  await update($, debt, () => n)
-  await syncUnlocked($)
+// The day starts at the person's first prompt; sets are spread from there.
+const dayStart = async ($: $, date: string) => {
+  const stored = (await $.store.get('dayStart')) as { date?: string; at?: number } | undefined
+  return stored?.date === date && typeof stored.at === 'number' ? stored.at : undefined
 }
 
-// Whether paid reps currently let prompts through: an unused pass, or inside the break.
-const syncUnlocked = async ($: $) => {
-  const owed = await read($, debt)
-  const paidAt = Number((await $.store.get('paidAt')) ?? 0)
-  const hasPass = (await $.store.get('hasPass')) === true
-  const isOpen = owed > 0 && (hasPass || (await $.clock.now()) - paidAt < GRACE_MS)
-  await update($, isUnlocked, () => isOpen)
-  return isOpen
+// Prompts before this hour belong to the night before: they never start the
+// day, or a 00:30 prompt would leave every set overdue by morning.
+const DAY_BEGINS_HOUR = 5
+
+const startDay = async ($: $) => {
+  const now = await $.clock.now()
+  if (new Date(now).getHours() < DAY_BEGINS_HOUR) return
+  const date = dayKey(now)
+  if ((await dayStart($, date)) === undefined) await $.store.set('dayStart', { date, at: now })
+}
+
+// Recomputes the pace and arms a timer for the next set coming due.
+const refreshPace = async ($: $): Promise<Pace | null> => {
+  dueTimer?.cancel()
+  dueTimer = undefined
+  // Re-read today: the date may have rolled over, or the shell script logged reps.
+  const t = await refreshToday($)
+  const at = t === null ? undefined : await dayStart($, t.date)
+  const now = await $.clock.now()
+  const next: Pace | null =
+    t === null || t.isRest || at === undefined
+      ? null
+      : paceAt(t.goal, t.count, setSizeFor(t.goal, paceConfig.setSize), at, now, paceConfig.windowMs)
+  await update($, pace, () => next)
+  if (next?.nextDueAt != null && t !== null && t.count < t.goal) {
+    dueTimer = $.clock.after(Math.max(1, next.nextDueAt - now), () => void setDue($))
+  }
+  return next
+}
+
+const setDue = async ($: $) => {
+  const p = await refreshPace($)
+  const t = await read($, today)
+  if (p === null || t === null || p.behind <= 0) return
+  toast($, `⏱ Set due: ${p.behind} ${t.exercise}. ${p.required}/${t.goal} by now.`)
+}
+
+// A Close button's press: a refused close says why instead of doing nothing.
+const closePane = async ($: $, id: string) => {
+  try {
+    await $.ui.close({ id })
+  } catch (err) {
+    toast($, `Couldn't close the panel (${err instanceof Error ? err.message : String(err)}). Try Esc or /fit hide.`)
+  }
+}
+
+const paceText = (p: Pace | null, isStrict: boolean) => {
+  if (p === null) return ''
+  if (p.behind > 0) return `  behind ${p.behind}${isStrict ? ' · prompts wait' : ''}`
+  return p.nextDueAt === null ? '' : `  next set ${clockTime(p.nextDueAt)}`
 }
 
 const line = (t: Today) => {
@@ -151,15 +242,8 @@ const line = (t: Today) => {
   return `${isDone ? '✅' : '💪'} ${bar(t.count, t.goal)} ${t.count}/${t.goal}${t.unit} ${t.exercise}`
 }
 
-// What a payment bought, for the /fit reply.
-const paidNote = (owedBefore: number, owedAfter: number) => {
-  if (owedAfter >= owedBefore) return ''
-  if (owedAfter === 0) return ' · debt paid'
-  return ` · debt ${owedAfter} left · next prompt + 2 min unlocked`
-}
-
-const withStreak = (t: Today, days: readonly Day[]) => {
-  const run = streak(days)
+const withStreak = (t: Today, days: readonly Day[], older = 0) => {
+  const run = fullStreak(days, older)
   return run > 0 ? `${line(t)}  🔥${run}d` : line(t)
 }
 
@@ -174,50 +258,19 @@ const logReps = async ($: $, change: (count: number) => number) => {
     days.map(day => (day.date === after.date ? { ...day, count } : day)),
   )
 
-  const added = count - before.count
-  const owed = await read($, debt)
-  if (added > 0) {
-    breakTimer?.cancel()
-    breakTimer = $.clock.after(GRACE_MS, () => void breakOver($))
-  }
-  if (added > 0 && owed > 0) {
-    const left = Math.max(0, owed - added)
-    await setDebt($, left)
-    await $.store.set('paidAt', await $.clock.now())
-    if (left > 0) await $.store.set('hasPass', true)
-    await syncUnlocked($)
-  }
+  await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
   return after
 }
 
-// Fires two minutes after the last logged set.
-const breakOver = async ($: $) => {
-  breakTimer = undefined
-  await syncUnlocked($)
-  const t = await read($, today)
-  if (t?.isRest === true) return
-  const owed = await read($, debt)
-  if (owed > 0) {
-    toast($, `⏱ Break's over. Debt ${owed} ${t?.exercise ?? 'reps'} left; prompts wait for your next set.`)
-  } else if (t !== null && t.goal > 0 && t.count < t.goal) {
-    toast($, `⏱ Break's over. Next set? ${t.count}/${t.goal}${t.unit} ${t.exercise}.`)
-  }
-}
-
-const nudge = async ($: $, reps: number, isStrict: boolean) => {
+// Easy mode: a suggestion once a turn runs long.
+const nudge = async ($: $, reps: number) => {
   const t = await read($, today)
   if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
   await update($, isWaiting, () => true)
-  if (isStrict) {
-    const owed = (await read($, debt)) + reps
-    await setDebt($, owed)
-    toast($, `Your agent's mid-set. +${reps} ${t.exercise} added · debt ${owed} left.`)
-  } else {
-    toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
-  }
+  toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
 }
 
 const endRest = async ($: $) => {
@@ -226,6 +279,7 @@ const endRest = async ($: $) => {
   await $.fs.write(`${(await files($)).log}/${t.date}.skip`, 'off\n')
   const back = await refreshToday($)
   await refreshHistory($)
+  await refreshPace($)
   return { text: `Rest day undone. Back to work. ${line(back)}` }
 }
 
@@ -272,6 +326,7 @@ const finishOnboarding = async ($: $) => {
   await markIntroduced($)
   await refreshToday($)
   await refreshHistory($)
+  await refreshPace($)
   await $.ui.close({ id: ONBOARD_PANE })
   const plan = routine ?? (JSON.parse(await $.fs.read(routinePath)) as Routine)
   toast($, `Program set: ${describeRoutine(plan)}. Get to work.`)
@@ -286,32 +341,40 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
   isSkipped: false,
 }))
 
+// Everything a conversation needs: the /fit command and today's state.
+const boot = async ($: $) => {
+  const introduced = (await $.store.get('introduced')) === true
+  await update($, isIntroduced, () => introduced)
+  await refreshToday($)
+  await refreshHistory($)
+  // Re-arms the due timer, which a restart or reload drops.
+  await refreshPace($)
+  // Last, so a refused registration can't leave the band without its state.
+  await $.command.register({
+    name: 'fit',
+    description: "Log reps toward today's goal",
+    argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
+    immediate: true,
+  })
+}
+
 export const register: Register = (on, options) => {
   const isStrict = options.strict === true
   const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
   const nudgeReps = Number(options.nudgeReps ?? 10)
+  paceConfig.setSize = Number(options.setSize ?? 0)
+  paceConfig.windowMs = Math.max(1, Number(options.windowHours ?? 8)) * HOUR_MS
   let timer: { cancel: () => void } | undefined
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'fit',
-      description: "Log reps toward today's goal",
-      argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
-      immediate: true,
-    })
-    const stored = Number((await $.store.get('debt')) ?? 0)
-    await update($, debt, () => (isStrict ? stored : 0))
-    await syncUnlocked($)
-    // A restart mid-break loses the timer: start one for whatever's left of it.
-    const breakLeft = Number((await $.store.get('paidAt')) ?? 0) + GRACE_MS - (await $.clock.now())
-    if (breakLeft > 0) {
-      breakTimer?.cancel()
-      breakTimer = $.clock.after(breakLeft, () => void breakOver($))
-    }
-    const introduced = (await $.store.get('introduced')) === true
-    await update($, isIntroduced, () => introduced)
-    await refreshToday($)
-    await refreshHistory($)
+    await boot($)
+    return next(e)
+  })
+
+  // /clear and an in-session /resume switch to another conversation in the
+  // same process without another session.start, so the setup runs again here.
+  on('classic.SessionStart', async ($, e, next) => {
+    if (e.source === 'clear' || e.source === 'resume') await boot($)
     return next(e)
   })
 
@@ -323,21 +386,18 @@ export const register: Register = (on, options) => {
       case 'add':
       case 'set': {
         if ((await refreshToday($)).isRest) return { text: "Today's a rest day. /fit rest off to train." }
-        const owedBefore = await read($, debt)
         const n = cmd.n
         const t = await logReps($, count => (cmd.kind === 'add' ? count + n : n))
-        return { text: `${line(t)}${paidNote(owedBefore, await read($, debt))}` }
+        return { text: `${line(t)}${paceText(await read($, pace), isStrict)}` }
       }
       case 'skip': {
         const t = await refreshToday($)
         if (t.isRest) return { text: 'Already a rest day. /fit rest off to train.' }
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
-        await setDebt($, 0)
-        breakTimer?.cancel()
-        breakTimer = undefined
         await refreshToday($)
         await refreshHistory($)
-        return { text: `Rest day logged. Streak resets, debt cleared. Back at it tomorrow. (/fit rest off to undo)` }
+        await refreshPace($)
+        return { text: `Rest day logged. Streak resets, no sets due today. Back at it tomorrow. (/fit rest off to undo)` }
       }
       case 'unskip':
         return endRest($)
@@ -347,8 +407,8 @@ export const register: Register = (on, options) => {
           return { text: 'Scoreboard closed.' }
         }
         const days = await refreshHistory($)
-        await $.ui.open({ id: PANE, title: 'TERMINAL GYM' })
-        return { text: `🔥 ${streak(days)}-day streak · /fit score again to close` }
+        await $.ui.open({ id: PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
+        return { text: `🔥 ${fullStreak(days, await read($, olderStreak))}-day streak · Esc or /fit score to close` }
       }
       case 'swap': {
         const before = await refreshToday($)
@@ -365,7 +425,9 @@ export const register: Register = (on, options) => {
         await refreshHistory($)
         const amount = before.unit === '' ? `${before.count} reps` : `${before.count}${before.unit}`
         const carried = before.count > 0 ? ` Your ${amount} carry over.` : ''
-        return { text: `Swapped to ${plan.exercise} today.${carried} ${line(await refreshToday($))}` }
+        const swapped = await refreshToday($)
+        await refreshPace($)
+        return { text: `Swapped to ${plan.exercise} today.${carried} ${line(swapped)}` }
       }
       case 'program':
         await openOnboarding($)
@@ -375,7 +437,7 @@ export const register: Register = (on, options) => {
         await update($, isIntroduced, () => false)
         return { text: 'Welcome is back above your prompt.' }
       case 'reset':
-        return { text: `Reset. ${line(await logReps($, () => 0))}` }
+        return { text: `Reset. ${line(await logReps($, () => 0))}${paceText(await read($, pace), isStrict)}` }
       case 'help':
         await markIntroduced($)
         await $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })
@@ -385,8 +447,8 @@ export const register: Register = (on, options) => {
         if (deny !== undefined) return { text: `Couldn't change strict mode: ${deny}` }
         return {
           text: cmd.isOn
-            ? 'Coach is strict. Long turns now cost reps, and prompts wait until you pay.'
-            : 'Coach is easy. Nudges only.',
+            ? `Coach is strict. Today's goal is spread into sets over ${paceConfig.windowMs / HOUR_MS}h from your first prompt; fall behind and prompts wait until you catch up.`
+            : 'Coach is easy. Same schedule on the band, nudges only, nothing held.',
         }
       }
       case 'hide':
@@ -395,40 +457,32 @@ export const register: Register = (on, options) => {
         return { text: 'Terminal Gym panels closed.' }
       case 'status': {
         const t = await refreshToday($)
-        const owed = await read($, debt)
-        const shown = withStreak(t, await refreshHistory($))
-        return { text: owed > 0 ? `${shown} · debt ${owed} left` : shown }
+        const shown = withStreak(t, await refreshHistory($), await read($, olderStreak))
+        return { text: `${shown}${paceText(await refreshPace($), isStrict)}` }
       }
     }
   })
 
   on('prompt.submit', async ($, e, next) => {
-    const isGated = isStrict && e.origin.kind === 'composer' && !e.text.trimStart().startsWith('/')
-    const owed = isGated ? await read($, debt) : 0
+    // Only prompts the person typed count: background tasks, loops and other
+    // sessions start turns too. Slash commands (like /fit 10) always pass.
+    const isTyped = e.origin.kind === 'composer' && !e.text.trimStart().startsWith('/')
+    if (!isTyped) return next(e)
+    await startDay($)
+    const p = await refreshPace($)
     const t = await read($, today)
-    // Rest days owe nothing; clear anything left from earlier in the day.
-    if (owed > 0 && t?.isRest === true) {
-      await setDebt($, 0)
-      return next(e)
-    }
-    if (owed > 0) {
-      // Any paid reps unlock the next prompt, plus every prompt for two minutes after.
-      if (!(await syncUnlocked($))) {
-        void $.prompt.fill({ text: e.text })
-        return {
-          drop: `Pay up first: ${owed} ${t?.exercise ?? 'reps'}. Log any reps (/fit 5) to unlock your next prompt + 2 min. /fit rest skips the day (breaks streak).`,
-        }
+    if (isStrict && p !== null && p.behind > 0) {
+      void $.prompt.fill({ text: e.text })
+      return {
+        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
       }
-      await $.store.set('hasPass', false)
-      await syncUnlocked($)
     }
     return next(e)
   })
 
-  on('turn.start', ($, e, next) => {
+  on('turn.start', async ($, e, next) => {
     timer?.cancel()
-    if (options.nudges === false) return next(e)
-    timer = $.clock.after(nudgeMs, () => void nudge($, nudgeReps, isStrict))
+    if (!isStrict && options.nudges !== false) timer = $.clock.after(nudgeMs, () => void nudge($, nudgeReps))
     return next(e)
   })
 
@@ -438,6 +492,7 @@ export const register: Register = (on, options) => {
       timer = undefined
       await update($, isWaiting, () => false)
       await refreshToday($)
+      await refreshPace($)
     }
     return next(e)
   })
@@ -516,13 +571,11 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const owed = await read($, debt)
     const days = await read($, history)
     const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
-    const debtText = owed > 0 ? `  debt ${owed} left · ${(await read($, isUnlocked)) ? 'prompts open' : 'pay to unlock'}` : ''
-    const progress = `${line(t)}${debtText}`
-    const run = streak(days)
+    const progress = `${line(t)}${paceText(await read($, pace), isStrict)}`
+    const run = fullStreak(days, await read($, olderStreak))
     const streakText = run > 0 ? `  🔥${run}d` : ''
     const LOG_LABEL = 'log reps: '
     const logWidth = cells(LOG_LABEL) + buttonsWidth(['+5', '+10', '+25']) + cells(streakText)
@@ -549,7 +602,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const days = await read($, history)
     const t = await read($, today)
-    const run = streak(days)
+    const run = fullStreak(days, await read($, olderStreak))
     const heat = heatCells(days)
     const week = days.slice(-7)
 
@@ -577,7 +630,8 @@ export const register: Register = (on, options) => {
     const countWidth = Math.max(0, ...counts.map(count => count.length))
     const summary = week.map((day, i) => {
       const mark = day.isSkipped ? '–' : day.goal > 0 && day.count >= day.goal ? '✓' : '·'
-      return `${mark} ${day.date.slice(5)}  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}`
+      const isToday = i === week.length - 1
+      return `${mark} ${day.date.slice(5)}  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}${isToday ? '  ◀ today' : ''}`
     })
 
     if (e.surface === 'terminal') {
@@ -588,12 +642,17 @@ export const register: Register = (on, options) => {
           <Text bold>🔥 {run}-day streak</Text>
           {t !== null && <Text dimColor>{line(t)}</Text>}
           <Text> </Text>
-          <Text dimColor>last {HISTORY_DAYS} days</Text>
+          <Text dimColor>last {HISTORY_DAYS} days · ▒ today</Text>
           <Raster key="heat" {...heat} />
           <Text> </Text>
-          {summary.map(row => <Text dimColor>{row}</Text>)}
+          {summary.map((row, i) => (
+            <Text dimColor={i !== summary.length - 1} bold={i === summary.length - 1}>
+              {row}
+            </Text>
+          ))}
           <Text> </Text>
-          <Button key="close" label="Close" onPress={() => $.ui.close({ id: PANE })} />
+          <Text dimColor>Esc or /fit score to close</Text>
+          <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
         </Box>
       )
     }
@@ -605,7 +664,7 @@ export const register: Register = (on, options) => {
         <Text bold>🔥 {run}-day streak</Text>
         {t !== null && <Text dimColor>{line(t)}</Text>}
         {summary.map(row => <Text dimColor>{row}</Text>)}
-        <Button key="close" label="Close" onPress={() => $.ui.close({ id: PANE })} />
+        <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
       </Box>
     )
   })
@@ -619,7 +678,7 @@ export const register: Register = (on, options) => {
         <Box>
           <Button key="setup" label="Pick your training" variant="primary" onPress={() => openOnboarding($)} />
           <Text> </Text>
-          <Button key="close" label="Close" onPress={() => $.ui.close({ id: HELP_PANE })} />
+          <Button key="close" label="Close" onPress={() => closePane($, HELP_PANE)} />
         </Box>
       </Box>
     )

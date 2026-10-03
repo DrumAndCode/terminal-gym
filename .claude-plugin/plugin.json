@@ -1,7 +1,7 @@
 {
   "name": "terminal-gym",
   "displayName": "Terminal Gym",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A daily bodyweight rep goal inside Claude Code: log with /fit, quick-log band, long-turn nudges, streaks and a score grid, optional strict mode.",
   "author": {
     "name": "Naitik Mehta",
@@ -28,8 +28,20 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Long turns add rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
+      "description": "Spread today's goal into sets from your first prompt; fall behind and prompts wait until you catch up (/fit rest breaks your streak instead).",
       "default": false
+    },
+    "windowHours": {
+      "type": "number",
+      "title": "Training window (hours)",
+      "description": "How long after your first prompt the day's sets are spread over.",
+      "default": 8
+    },
+    "setSize": {
+      "type": "number",
+      "title": "Set size",
+      "description": "Reps per set; 0 means a tenth of the day's goal, rounded to fives.",
+      "default": 0
     },
     "nudgeSeconds": {
       "type": "number",
@@ -40,13 +52,13 @@
     "nudgeReps": {
       "type": "number",
       "title": "Reps per nudge",
-      "description": "Reps suggested (and owed, in strict mode) per long turn.",
+      "description": "Reps suggested per long turn in easy mode.",
       "default": 10
     },
     "spinner": {
       "type": "boolean",
       "title": "Spinner takeover",
-      "description": "Replace the spinner word with the suggested set during long turns.",
+      "description": "Replace the spinner word with the suggested set during long turns (easy mode).",
       "default": true
     },
     "band": {

@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, cells, parseCustom, parseFit, pickSwap, progressColor, scale, streak } from '../hooks/lib'
+import { buttonsWidth, cells, paceAt, parseCustom, parseFit, pickSwap, progressColor, scale, setSizeFor, streak } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -13,9 +13,9 @@ const MONDAY_9AM = new Date(2026, 9, 5, 9).getTime()
 const world = (
   on: On,
   files = new Map<string, string>(),
-  { introduced = true, store = {} as Record<string, unknown> } = {},
+  { introduced = true, store = {} as Record<string, unknown>, now = MONDAY_9AM } = {},
 ) => {
-  const clock = mock.clock(on, { now: MONDAY_9AM })
+  const clock = mock.clock(on, { now })
   mock.store(on, { ...(introduced ? { introduced: true } : {}), ...store })
   mock.env(on, { HOME })
   const toasts: string[] = []
@@ -37,7 +37,11 @@ const world = (
     toasts.push(e.text)
     return { value: undefined }
   })
-  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  const registered: string[] = []
+  on('command.register', ($, e) => {
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
   const config = new Map<string, unknown>()
   on('config.set', ($, e) => {
     config.set(e.key, e.value)
@@ -55,11 +59,13 @@ const world = (
   })
   on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
   on('prompt.fill', () => ({ isFilled: true }))
-  on('prompt.submit', ($, e) => ({ text: e.text }))
+  // What sits beneath the mod: a settings hook may refuse the prompt.
+  const below = { refuse: undefined as string | undefined }
+  on('prompt.submit', ($, e) => (below.refuse === undefined ? { text: e.text } : { drop: below.refuse }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  return { clock, files, toasts, open, config, calls }
+  return { clock, files, toasts, open, config, calls, registered, below }
 }
 
 const fit = ($: Engine, args: string) =>
@@ -69,6 +75,9 @@ const fit = ($: Engine, args: string) =>
     origin: { kind: 'composer' },
     presentation: { isFullscreen: false, columns: 120 },
   })
+
+// A prompt the person typed: in strict mode, the one thing that costs reps.
+const send = ($: Engine, text = 'go') => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
 
 const start = ($: Engine) =>
   $.session.start({ cwd: HOME, surface: 'terminal', isInteractive: true })
@@ -146,99 +155,10 @@ describe('nudges', () => {
     expect(submitted.drop).toBeUndefined()
   })
 
-  test('strict mode holds prompts until the debt is paid', { options: { strict: true } }, async ($, on) => {
-    const { clock, files } = world(on)
+  test('/fit rest marks the day and holds nothing', { options: { strict: true } }, async ($, on) => {
+    const { files } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
-
-    const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(held.drop).toContain('Pay up first: 10 pushups')
-
-    await fit($, '10')
-    const let_through = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(let_through.drop).toBeUndefined()
-    expect(files.get(`${LOG}/2026-10-05`)).toBe('10\n')
-  })
-
-  test('any payment buys two minutes of prompts, then the rest is due', { options: { strict: true } }, async ($, on) => {
-    const { clock, toasts } = world(on)
-    await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
-    await $.turn.start({ text: 'go', turnId: 't2' })
-    await clock.advance(31_000)
-    expect(toasts).toContain("Your agent's mid-set. +10 pushups added · debt 20 left.")
-
-    const reply = await fit($, '5')
-    expect(reply.text).toContain('debt 15 left · next prompt + 2 min unlocked')
-    const paid = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(paid.drop).toBeUndefined()
-
-    await clock.advance(119_000)
-    const still = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(still.drop).toBeUndefined()
-
-    await clock.advance(2_000)
-    const due = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(due.drop).toContain('Pay up first: 15 pushups')
-  })
-
-  test('a payment always unlocks the next prompt, even after the break', { options: { strict: true } }, async ($, on) => {
-    const { clock } = world(on)
-    await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
-
-    await fit($, '3')
-    await clock.advance(5 * 60_000)
-    const late = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(late.drop).toBeUndefined()
-
-    const again = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(again.drop).toContain('Pay up first: 7 pushups')
-  })
-
-  test('paying it all off leaves no pass for the next debt', { options: { strict: true } }, async ($, on) => {
-    const { clock } = world(on)
-    await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
-    expect((await fit($, '10')).text).toContain('debt paid')
-
-    await clock.advance(3 * 60_000)
-    await $.turn.start({ text: 'go', turnId: 't2' })
-    await clock.advance(31_000)
-    const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(held.drop).toContain('Pay up first: 10 pushups')
-  })
-
-  test('a toast says when the break after a set is over', { options: { strict: true } }, async ($, on) => {
-    const { clock, toasts } = world(on)
-    await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
-    await fit($, '4')
-    await clock.advance(119_000)
-    expect(toasts.some(t => t.includes("Break's over"))).toBe(false)
-    await clock.advance(2_000)
-    expect(toasts.some(t => t.includes("Break's over. Debt 6 pushups left"))).toBe(true)
-  })
-
-  test('without debt, the break toast asks for the next set', async ($, on) => {
-    const { clock, toasts } = world(on)
-    await start($)
-    await fit($, '20')
-    await fit($, '20')
-    await clock.advance(121_000)
-    expect(toasts.filter(t => t.includes("Break's over. Next set? 40/100 pushups"))).toHaveLength(1)
-  })
-
-  test('/fit rest clears the debt and marks the day', { options: { strict: true } }, async ($, on) => {
-    const { clock, files } = world(on)
-    await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
+    await send($)
     await fit($, 'rest')
     expect(files.has(`${LOG}/2026-10-05.skip`)).toBe(true)
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
@@ -581,19 +501,6 @@ test('below the wordmark width the band shows the bare name', async ($, on) => {
   await ui.unmount()
 })
 
-test('the band labels debt as what is left and says if prompts are open', { options: { strict: true } }, async ($, on) => {
-  const { clock } = world(on)
-  await start($)
-  await $.turn.start({ text: 'go', turnId: 't1' })
-  await clock.advance(31_000)
-  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
-  expect(await ui.find({ type: 'Text', text: /debt 10 left · pay to unlock/ })).toBeDefined()
-  await ui.press({ key: 'add5' })
-  expect(await ui.find({ type: 'Text', text: /debt 5 left · prompts open/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /owe/ })).toBeUndefined()
-  await ui.unmount()
-})
-
 test('a rest day hides the rep buttons and offers a way back', async ($, on) => {
   world(on)
   await start($)
@@ -623,7 +530,7 @@ describe('rest days', () => {
     expect((await fit($, 'rest off')).text).toContain("Today isn't a rest day")
   })
 
-  test('no nudges or debt on a rest day', { options: { strict: true } }, async ($, on) => {
+  test('no nudges or held prompts on a rest day', { options: { strict: true } }, async ($, on) => {
     const { clock, toasts } = world(on)
     await start($)
     await fit($, 'rest')
@@ -634,12 +541,11 @@ describe('rest days', () => {
     expect(submitted.drop).toBeUndefined()
   })
 
-  test('debt left from earlier never holds prompts on a rest day', { options: { strict: true } }, async ($, on) => {
-    const { clock, files } = world(on)
+  test('a rest day marked by hand holds nothing, even when behind', { options: { strict: true } }, async ($, on) => {
+    const { files } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
-    // A rest day marked outside /fit rest (or before rest days cleared debt).
+    await send($)
+    // A rest day marked outside /fit rest, after falling behind.
     files.set(`${LOG}/2026-10-05.skip`, '')
     await fit($, '')
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
@@ -652,15 +558,6 @@ describe('rest days', () => {
     await fit($, 'rest')
     expect((await fit($, 'rest')).text).toContain('Already a rest day')
   })
-})
-
-test('a restart mid-break still ends the break on time', { options: { strict: true } }, async ($, on) => {
-  const { clock, toasts } = world(on, new Map(), { store: { debt: 10, paidAt: MONDAY_9AM - 60_000 } })
-  await start($)
-  await clock.advance(59_000)
-  expect(toasts.some(t => t.includes("Break's over"))).toBe(false)
-  await clock.advance(2_000)
-  expect(toasts.some(t => t.includes("Break's over. Debt 10"))).toBe(true)
 })
 
 test('Pick your training opens the walkthrough before any other work', async ($, on) => {
@@ -683,4 +580,206 @@ test('score rows name each day\'s exercise', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /10-03  300\/300  squats/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /10-05  15\/100   pushups/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('/clear and /resume run the setup again', async ($, on) => {
+  on('classic.SessionStart', () => ({}))
+  const { registered } = world(on)
+  await start($)
+  expect(registered).toEqual(['fit'])
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(registered).toEqual(['fit', 'fit'])
+  await $.classic.SessionStart({ source: 'resume' })
+  expect(registered).toEqual(['fit', 'fit', 'fit'])
+  await $.classic.SessionStart({ source: 'compact' })
+  expect(registered).toEqual(['fit', 'fit', 'fit'])
+})
+
+test('easy mode still waits for a long turn before nudging', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await start($)
+  await $.turn.start({ text: 'quick one', turnId: 't1' })
+  expect(toasts.some(t => t.includes('mid-set'))).toBe(false)
+  await clock.advance(31_000)
+  expect(toasts.some(t => t.includes('You next: 10 pushups'))).toBe(true)
+})
+
+describe('pace', () => {
+  const HOUR = 60 * 60_000
+  const GAP = (8 * HOUR) / 9 // 100 pushups in sets of 10: ten sets, nine gaps
+
+  test('sets are spread evenly from the first prompt', async () => {
+    expect(setSizeFor(100, 0)).toBe(10)
+    expect(setSizeFor(300, 0)).toBe(30)
+    expect(setSizeFor(12, 0)).toBe(5)
+    expect(setSizeFor(3, 0)).toBe(3)
+    expect(setSizeFor(100, 15)).toBe(15)
+    expect(paceAt(100, 0, 10, 0, 0, 8 * HOUR)).toEqual({ required: 10, behind: 10, setSize: 10, nextDueAt: GAP })
+    expect(paceAt(100, 10, 10, 0, GAP - 1, 8 * HOUR).behind).toBe(0)
+    expect(paceAt(100, 10, 10, 0, GAP, 8 * HOUR).behind).toBe(10)
+    expect(paceAt(100, 40, 10, 0, 8 * HOUR, 8 * HOUR)).toEqual({ required: 100, behind: 60, setSize: 10, nextDueAt: null })
+    expect(paceAt(0, 0, 0, 0, 0, 8 * HOUR).behind).toBe(0)
+  })
+
+  test('strict: the first prompt of the day needs the opening set', { options: { strict: true } }, async ($, on) => {
+    world(on)
+    await start($)
+    const first = await send($)
+    expect(first.drop).toContain('Behind pace: 10 pushups')
+    await fit($, '10')
+    expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('strict: the next set comes due on schedule, with a toast', { options: { strict: true } }, async ($, on) => {
+    const { clock, toasts } = world(on)
+    await start($)
+    await send($)
+    await fit($, '10')
+    await clock.advance(GAP - 1_000)
+    expect((await send($)).drop).toBeUndefined()
+    await clock.advance(2_000)
+    expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 20/100 by now.'))).toBe(true)
+    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
+    await fit($, '10')
+    expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('easy: same schedule on the band, nothing held', async ($, on) => {
+    const { clock, toasts } = world(on)
+    await start($)
+    expect((await send($)).drop).toBeUndefined()
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /behind 10/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /prompts wait/ })).toBeUndefined()
+    await ui.press({ key: 'add10' })
+    expect(await ui.find({ type: 'Text', text: /next set 09:53/ })).toBeDefined()
+    await ui.unmount()
+    await clock.advance(GAP)
+    expect(toasts.some(t => t.includes('Set due'))).toBe(true)
+    expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('strict: the band says prompts wait while behind', { options: { strict: true } }, async ($, on) => {
+    world(on)
+    await start($)
+    await send($)
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /behind 10 · prompts wait/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('strict: turns you did not start never start the day or get held', { options: { strict: true } }, async ($, on) => {
+    world(on)
+    await start($)
+    const bg = await $.prompt.submit({ text: 'task done', wait: false, origin: { kind: 'task-notification' } })
+    expect(bg.drop).toBeUndefined()
+    expect((await send($, '/fit score')).drop).toBeUndefined()
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /behind/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('strict: a rest day holds nothing', { options: { strict: true } }, async ($, on) => {
+    world(on)
+    await start($)
+    await fit($, 'rest')
+    expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('the day start survives a restart and the due timer comes back', async ($, on) => {
+    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05`, '10\n']]), {
+      store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - 60_000 } },
+    })
+    await start($)
+    await clock.advance(GAP - 60_000 + 1_000)
+    expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups'))).toBe(true)
+  })
+
+  test('yesterday\'s start does not count today', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map(), { store: { dayStart: { date: '2026-10-04', at: MONDAY_9AM - 20 * HOUR } } })
+    await start($)
+    expect((await send($)).drop).toContain('10/100 due by now')
+  })
+})
+
+test('a 00:30 prompt never starts the day, so 9am is not a wall of overdue sets', { options: { strict: true } }, async ($, on) => {
+  const { clock } = world(on, new Map(), { now: new Date(2026, 9, 5, 0, 30).getTime() })
+  await start($)
+  expect((await send($)).drop).toBeUndefined()
+  await clock.set(new Date(2026, 9, 5, 9, 0).getTime())
+  expect((await send($)).drop).toContain('(10/100 due by now)')
+})
+
+test('the shell script catching you up is seen by the gate', { options: { strict: true } }, async ($, on) => {
+  const { files } = world(on)
+  await start($)
+  expect((await send($)).drop).toContain('Behind pace')
+  files.set(`${LOG}/2026-10-05`, '10\n')
+  expect((await send($)).drop).toBeUndefined()
+})
+
+describe('streaks and today', () => {
+  const daysBefore = (n: number) => {
+    const files = new Map<string, string>([
+      [`${HOME}/.claude/fitness/routine.json`, JSON.stringify(Object.fromEntries(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(d => [d, { exercise: 'pushups', goal: 10 }])))],
+    ])
+    for (let i = 1; i <= n; i++) {
+      const d = new Date(2026, 9, 5 - i, 12)
+      files.set(`${LOG}/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, '10\n')
+    }
+    return files
+  }
+
+  test('a streak longer than the 28-day grid keeps counting', async ($, on) => {
+    world(on, daysBefore(40))
+    await start($)
+    expect((await fit($, '')).text).toContain('🔥40d')
+    await fit($, '10')
+    expect((await fit($, '')).text).toContain('🔥41d')
+  })
+
+  test('a missed day ends the streak', async ($, on) => {
+    const files = daysBefore(40)
+    files.delete(`${LOG}/2026-10-01`)
+    world(on, files)
+    await start($)
+    expect((await fit($, '')).text).toContain('🔥3d')
+  })
+
+  test('the scoreboard marks today', async ($, on) => {
+    world(on)
+    await start($)
+    await fit($, 'score')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /10-05 .*◀ today/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▒ today/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the scoreboard opens closable with Esc, and Close closes it', async ($, on) => {
+    const { open, calls } = world(on)
+    await start($)
+    await fit($, 'score')
+    expect(open.has('gym-week')).toBe(true)
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
+    await ui.press({ key: 'close' })
+    expect(open.has('gym-week')).toBe(false)
+    await ui.unmount()
+    expect(calls).toContain('ui.open:gym-week')
+  })
+})
+
+test('a long streak is cached, so later refreshes skip the walk back', async ($, on) => {
+  const routine = JSON.stringify(Object.fromEntries(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(d => [d, { exercise: 'pushups', goal: 10 }])))
+  const files = new Map<string, string>([[`${HOME}/.claude/fitness/routine.json`, routine]])
+  for (let i = 1; i <= 40; i++) {
+    const d = new Date(2026, 9, 5 - i, 12)
+    files.set(`${LOG}/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, '10\n')
+  }
+  const { calls } = world(on, files)
+  await start($)
+  calls.length = 0
+  expect((await fit($, '')).text).toContain('🔥40d')
+  // The window's 28 days are re-read; nothing older is.
+  expect(calls.filter(c => c === 'fs.exists').length).toBeLessThan(28 * 3 + 10)
 })

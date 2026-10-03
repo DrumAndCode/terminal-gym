@@ -1,4 +1,4 @@
-import type { Day } from '../types'
+import type { Day, Pace } from '../types'
 
 export type Routine = Record<string, { exercise: string; goal: number; unit?: string }>
 
@@ -80,7 +80,7 @@ export const parseFit = (args: string): FitCommand => {
   return { kind: 'error', text: USAGE }
 }
 
-const isDone = (day: Day) => !day.isSkipped && day.goal > 0 && day.count >= day.goal
+export const isDone = (day: Day) => !day.isSkipped && day.goal > 0 && day.count >= day.goal
 
 // Today counts once done; an unfinished today does not break the run yet.
 export const streak = (history: readonly Day[]) => {
@@ -102,6 +102,14 @@ const PARTIAL = 0x6b5d3f
 const EMPTY = 0x343434
 const DEFAULT = 0x01000000
 
+// The streak, counting days older than the window when the window is all done.
+export const fullStreak = (history: readonly Day[], older: number) => {
+  const run = streak(history)
+  const last = history[history.length - 1]
+  const coversWindow = run === history.length || (run === history.length - 1 && last !== undefined && !isDone(last))
+  return coversWindow ? run + older : run
+}
+
 // One row per week, seven 2-cell days with a gap: 20 columns.
 export const heatCells = (history: readonly Day[]) => {
   const weeks = Math.ceil(history.length / 7)
@@ -119,7 +127,9 @@ export const heatCells = (history: readonly Day[]) => {
             ? PARTIAL
             : EMPTY
       const at = (row * columns + col) * 3
-      words[at] = isGap ? 0x20 : 0x2588
+      // Today, the last day, is drawn shaded so it stands out from finished days.
+      const isToday = row * 7 + Math.floor(col / 3) === history.length - 1
+      words[at] = isGap ? 0x20 : isToday ? 0x2592 : 0x2588
       words[at + 1] = color
       words[at + 2] = DEFAULT
     }
@@ -192,6 +202,41 @@ export const buttonsWidth = (labels: readonly string[]) =>
 // Small plate, big plate, bar: ❚█═TERMINAL-GYM═█❚
 export const MINI_BARBELL = { small: '❚', plate: '█═', name: 'TERMINAL-GYM', plateRight: '═█' } as const
 
+// A set is a tenth of the goal, rounded to fives, unless the person picked a size.
+export const setSizeFor = (goal: number, setting: number) => {
+  if (goal <= 0) return 0
+  if (setting > 0) return Math.min(setting, goal)
+  return Math.min(goal, Math.max(5, Math.round(goal / 10 / 5) * 5))
+}
+
+// The goal as evenly spaced sets: the first due at the start, the last at the
+// end of the window. `required` is what should be done by `now`.
+export const paceAt = (
+  goal: number,
+  count: number,
+  setSize: number,
+  startedAt: number,
+  now: number,
+  windowMs: number,
+): Pace => {
+  if (goal <= 0 || setSize <= 0) return { required: 0, behind: 0, setSize, nextDueAt: null }
+  const sets = Math.ceil(goal / setSize)
+  const gap = sets > 1 ? windowMs / (sets - 1) : windowMs
+  const due = Math.min(sets, 1 + Math.floor(Math.max(0, now - startedAt) / gap))
+  const required = Math.min(goal, due * setSize)
+  return {
+    required,
+    behind: Math.max(0, required - count),
+    setSize,
+    nextDueAt: due < sets ? startedAt + due * gap : null,
+  }
+}
+
+export const clockTime = (ms: number) => {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
@@ -222,10 +267,11 @@ or press **+5 / +10 / +25** above the prompt
 
 ### Strict mode
 Off by default. When it's on:
-- long turns put you in rep debt
-- your next prompt waits until you pay
-- log any reps to unlock your next prompt, plus every prompt for 2 minutes after
-- whatever's left comes due when the 2 minutes are up
+- today's goal is split into sets, spread over 8 hours (by default) from your first prompt
+- prompts before 5am count as the night before
+- the first set is due right away
+- fall behind and your prompts wait until you catch up
+- a toast tells you when each set comes due
 - \`/fit rest\` bails, but costs your streak
 
 **Turn it on:** type \`/fit strict\`
