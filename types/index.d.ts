@@ -39,6 +39,7 @@ declare module 'claude-code' {
       onboardStep: number
       onboardPick: OnboardPick
       history: Day[]
+      olderStreak: number
     }
   }
 }

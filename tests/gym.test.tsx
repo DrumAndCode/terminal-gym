@@ -717,3 +717,54 @@ test('the shell script catching you up is seen by the gate', { options: { strict
   files.set(`${LOG}/2026-10-05`, '10\n')
   expect((await send($)).drop).toBeUndefined()
 })
+
+describe('streaks and today', () => {
+  const daysBefore = (n: number) => {
+    const files = new Map<string, string>([
+      [`${HOME}/.claude/fitness/routine.json`, JSON.stringify(Object.fromEntries(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(d => [d, { exercise: 'pushups', goal: 10 }])))],
+    ])
+    for (let i = 1; i <= n; i++) {
+      const d = new Date(2026, 9, 5 - i, 12)
+      files.set(`${LOG}/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, '10\n')
+    }
+    return files
+  }
+
+  test('a streak longer than the 28-day grid keeps counting', async ($, on) => {
+    world(on, daysBefore(40))
+    await start($)
+    expect((await fit($, '')).text).toContain('🔥40d')
+    await fit($, '10')
+    expect((await fit($, '')).text).toContain('🔥41d')
+  })
+
+  test('a missed day ends the streak', async ($, on) => {
+    const files = daysBefore(40)
+    files.delete(`${LOG}/2026-10-01`)
+    world(on, files)
+    await start($)
+    expect((await fit($, '')).text).toContain('🔥3d')
+  })
+
+  test('the scoreboard marks today', async ($, on) => {
+    world(on)
+    await start($)
+    await fit($, 'score')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /10-05 .*◀ today/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▒ today/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the scoreboard opens closable with Esc, and Close closes it', async ($, on) => {
+    const { open, calls } = world(on)
+    await start($)
+    await fit($, 'score')
+    expect(open.has('gym-week')).toBe(true)
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
+    await ui.press({ key: 'close' })
+    expect(open.has('gym-week')).toBe(false)
+    await ui.unmount()
+    expect(calls).toContain('ui.open:gym-week')
+  })
+})

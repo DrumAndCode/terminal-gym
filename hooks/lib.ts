@@ -102,6 +102,16 @@ const PARTIAL = 0x6b5d3f
 const EMPTY = 0x343434
 const DEFAULT = 0x01000000
 
+// The streak, counting days older than the window when the window is all done.
+export const fullStreak = (history: readonly Day[], older: number) => {
+  const run = streak(history)
+  const last = history[history.length - 1]
+  const coversWindow = run === history.length || (run === history.length - 1 && last !== undefined && !isDone(last))
+  return coversWindow ? run + older : run
+}
+
+export const isDoneDay = (day: Day) => isDone(day)
+
 // One row per week, seven 2-cell days with a gap: 20 columns.
 export const heatCells = (history: readonly Day[]) => {
   const weeks = Math.ceil(history.length / 7)
@@ -119,7 +129,9 @@ export const heatCells = (history: readonly Day[]) => {
             ? PARTIAL
             : EMPTY
       const at = (row * columns + col) * 3
-      words[at] = isGap ? 0x20 : 0x2588
+      // Today, the last day, is drawn shaded so it stands out from finished days.
+      const isToday = row * 7 + Math.floor(col / 3) === history.length - 1
+      words[at] = isGap ? 0x20 : isToday ? 0x2592 : 0x2588
       words[at + 1] = color
       words[at + 2] = DEFAULT
     }

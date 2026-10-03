@@ -16,6 +16,8 @@ import {
   buttonsWidth,
   cells,
   dayKey,
+  fullStreak,
+  isDoneDay,
   describeRoutine,
   heatCells,
   lastDays,
@@ -45,6 +47,7 @@ const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
 let dueTimer: { cancel: () => void } | undefined
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
+const olderStreak = atom({ plugin: 'terminal-gym', key: 'olderStreak' } as const, 0)
 const pace = atom({ plugin: 'terminal-gym', key: 'pace' } as const, null)
 const isWaiting = atom({ plugin: 'terminal-gym', key: 'isWaiting' } as const, false)
 const history = atom({ plugin: 'terminal-gym', key: 'history' } as const, [])
@@ -129,6 +132,27 @@ const refreshHistory = async ($: $) => {
     }),
   )
   await update($, history, () => days)
+  // A streak longer than the window: walk back past it, a day at a time.
+  let older = 0
+  const first = days[0]
+  if (first !== undefined && isDoneDay(first)) {
+    const oldest = lastDays(await $.clock.now(), HISTORY_DAYS)[0] ?? 0
+    for (let back = 1; back <= 366; back++) {
+      const ms = oldest - back * 86_400_000
+      const date = dayKey(ms)
+      const plan = (await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)]
+      const day = {
+        date,
+        count: await readCount($, `${logDir}/${date}`),
+        goal: plan?.goal ?? 0,
+        exercise: plan?.exercise ?? 'reps',
+        isSkipped: await readRest($, `${logDir}/${date}.skip`),
+      }
+      if (!isDoneDay(day)) break
+      older++
+    }
+  }
+  await update($, olderStreak, () => older)
   return days
 }
 
@@ -175,6 +199,15 @@ const setDue = async ($: $) => {
   toast($, `⏱ Set due: ${p.behind} ${t.exercise}. ${p.required}/${t.goal} by now.`)
 }
 
+// A Close button's press: a refused close says why instead of doing nothing.
+const closePane = async ($: $, id: string) => {
+  try {
+    await $.ui.close({ id })
+  } catch (err) {
+    toast($, `Couldn't close the panel (${err instanceof Error ? err.message : String(err)}). Try Esc or /fit hide.`)
+  }
+}
+
 const paceText = (p: Pace | null, isStrict: boolean) => {
   if (p === null) return ''
   if (p.behind > 0) return `  behind ${p.behind}${isStrict ? ' · prompts wait' : ''}`
@@ -186,8 +219,8 @@ const line = (t: Today) => {
   return `${isDone ? '✅' : '💪'} ${bar(t.count, t.goal)} ${t.count}/${t.goal}${t.unit} ${t.exercise}`
 }
 
-const withStreak = (t: Today, days: readonly Day[]) => {
-  const run = streak(days)
+const withStreak = (t: Today, days: readonly Day[], older = 0) => {
+  const run = fullStreak(days, older)
   return run > 0 ? `${line(t)}  🔥${run}d` : line(t)
 }
 
@@ -351,8 +384,8 @@ export const register: Register = (on, options) => {
           return { text: 'Scoreboard closed.' }
         }
         const days = await refreshHistory($)
-        await $.ui.open({ id: PANE, title: 'TERMINAL GYM' })
-        return { text: `🔥 ${streak(days)}-day streak · /fit score again to close` }
+        await $.ui.open({ id: PANE, title: 'TERMINAL GYM', closeOnEscape: true })
+        return { text: `🔥 ${fullStreak(days, await read($, olderStreak))}-day streak · Esc or /fit score to close` }
       }
       case 'swap': {
         const before = await refreshToday($)
@@ -401,7 +434,7 @@ export const register: Register = (on, options) => {
         return { text: 'Terminal Gym panels closed.' }
       case 'status': {
         const t = await refreshToday($)
-        const shown = withStreak(t, await refreshHistory($))
+        const shown = withStreak(t, await refreshHistory($), await read($, olderStreak))
         return { text: `${shown}${paceText(await refreshPace($), isStrict)}` }
       }
     }
@@ -519,7 +552,7 @@ export const register: Register = (on, options) => {
     const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
     const progress = `${line(t)}${paceText(await read($, pace), isStrict)}`
-    const run = streak(days)
+    const run = fullStreak(days, await read($, olderStreak))
     const streakText = run > 0 ? `  🔥${run}d` : ''
     const LOG_LABEL = 'log reps: '
     const logWidth = cells(LOG_LABEL) + buttonsWidth(['+5', '+10', '+25']) + cells(streakText)
@@ -546,7 +579,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const days = await read($, history)
     const t = await read($, today)
-    const run = streak(days)
+    const run = fullStreak(days, await read($, olderStreak))
     const heat = heatCells(days)
     const week = days.slice(-7)
 
@@ -574,7 +607,8 @@ export const register: Register = (on, options) => {
     const countWidth = Math.max(0, ...counts.map(count => count.length))
     const summary = week.map((day, i) => {
       const mark = day.isSkipped ? '–' : day.goal > 0 && day.count >= day.goal ? '✓' : '·'
-      return `${mark} ${day.date.slice(5)}  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}`
+      const isToday = i === week.length - 1
+      return `${mark} ${day.date.slice(5)}  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}${isToday ? '  ◀ today' : ''}`
     })
 
     if (e.surface === 'terminal') {
@@ -585,12 +619,17 @@ export const register: Register = (on, options) => {
           <Text bold>🔥 {run}-day streak</Text>
           {t !== null && <Text dimColor>{line(t)}</Text>}
           <Text> </Text>
-          <Text dimColor>last {HISTORY_DAYS} days</Text>
+          <Text dimColor>last {HISTORY_DAYS} days · ▒ today</Text>
           <Raster key="heat" {...heat} />
           <Text> </Text>
-          {summary.map(row => <Text dimColor>{row}</Text>)}
+          {summary.map((row, i) => (
+            <Text dimColor={i !== summary.length - 1} bold={i === summary.length - 1}>
+              {row}
+            </Text>
+          ))}
           <Text> </Text>
-          <Button key="close" label="Close" onPress={() => $.ui.close({ id: PANE })} />
+          <Text dimColor>Esc or /fit score to close</Text>
+          <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
         </Box>
       )
     }
@@ -602,7 +641,7 @@ export const register: Register = (on, options) => {
         <Text bold>🔥 {run}-day streak</Text>
         {t !== null && <Text dimColor>{line(t)}</Text>}
         {summary.map(row => <Text dimColor>{row}</Text>)}
-        <Button key="close" label="Close" onPress={() => $.ui.close({ id: PANE })} />
+        <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
       </Box>
     )
   })
@@ -616,7 +655,7 @@ export const register: Register = (on, options) => {
         <Box>
           <Button key="setup" label="Pick your training" variant="primary" onPress={() => openOnboarding($)} />
           <Text> </Text>
-          <Button key="close" label="Close" onPress={() => $.ui.close({ id: HELP_PANE })} />
+          <Button key="close" label="Close" onPress={() => closePane($, HELP_PANE)} />
         </Box>
       </Box>
     )
