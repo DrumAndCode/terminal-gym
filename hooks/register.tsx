@@ -236,18 +236,22 @@ const KEEP = 'Keep my current routine'
 const DEFAULT_PROGRAM = 'Push · dip · squat rotation'
 
 const openOnboarding = async ($: $) => {
+  // Open first: a pane counts as asked for only while the press or command that
+  // asked is still being answered. Opened after other awaits, the engine treats
+  // it as unasked and leaves it undrawn below 144 columns.
+  await update($, onboardStep, () => 0)
+  const opened = await $.ui.open({ id: ONBOARD_PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
+  if (!opened.isPlaced) toast($, 'Widen the terminal to see the walkthrough, or type /fit program.')
   // A seeded default counts as no routine of their own; only custom ones get "keep".
   const { routine: routinePath } = await files($)
   const hasRoutine =
     (await $.fs.exists(routinePath)) &&
     JSON.stringify(await loadRoutine($, routinePath)) !== JSON.stringify(DEFAULT_ROUTINE)
-  await update($, onboardStep, () => 0)
   await update($, onboardPick, () => ({
     program: hasRoutine ? KEEP : DEFAULT_PROGRAM,
     size: 'Standard',
     hasRoutine,
   }))
-  await $.ui.open({ id: ONBOARD_PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
 }
 
 const pickedRoutine = (p: OnboardPick): Routine | undefined => {
@@ -458,11 +462,11 @@ export const register: Register = (on, options) => {
     if (!(await read($, isIntroduced))) {
       const buttons = (
         <Box key="buttons" flexDirection={cols >= BUTTONS_WIDTH ? 'row' : 'column'}>
-          <Button key="setup" label="Pick your training" variant="primary" onPress={() => void openOnboarding($)} />
+          <Button key="setup" label="Pick your training" variant="primary" onPress={() => openOnboarding($)} />
           {cols >= BUTTONS_WIDTH && <Text> </Text>}
-          <Button key="help" label="House rules" onPress={() => void $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })} />
+          <Button key="help" label="House rules" onPress={() => $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })} />
           {cols >= BUTTONS_WIDTH && <Text> </Text>}
-          <Button key="dismiss" label="Just train" onPress={() => void markIntroduced($)} />
+          <Button key="dismiss" label="Just train" onPress={() => markIntroduced($)} />
         </Box>
       )
       const header = (
@@ -504,7 +508,7 @@ export const register: Register = (on, options) => {
             {REST}
             {'  '}
           </Text>
-          <Button key="train" label={TRAIN} onPress={() => void endRest($)} />
+          <Button key="train" label={TRAIN} onPress={() => endRest($)} />
         </Box>
       )
     }
@@ -583,7 +587,7 @@ export const register: Register = (on, options) => {
           <Text> </Text>
           {summary.map(row => <Text dimColor>{row}</Text>)}
           <Text> </Text>
-          <Button key="close" label="Close" onPress={() => void $.ui.close({ id: PANE })} />
+          <Button key="close" label="Close" onPress={() => $.ui.close({ id: PANE })} />
         </Box>
       )
     }
@@ -595,7 +599,7 @@ export const register: Register = (on, options) => {
         <Text bold>🔥 {run}-day streak</Text>
         {t !== null && <Text dimColor>{line(t)}</Text>}
         {summary.map(row => <Text dimColor>{row}</Text>)}
-        <Button key="close" label="Close" onPress={() => void $.ui.close({ id: PANE })} />
+        <Button key="close" label="Close" onPress={() => $.ui.close({ id: PANE })} />
       </Box>
     )
   })
@@ -607,9 +611,9 @@ export const register: Register = (on, options) => {
         <Markdown text={HELP} />
         <Text> </Text>
         <Box>
-          <Button key="setup" label="Pick your training" variant="primary" onPress={() => void openOnboarding($)} />
+          <Button key="setup" label="Pick your training" variant="primary" onPress={() => openOnboarding($)} />
           <Text> </Text>
-          <Button key="close" label="Close" onPress={() => void $.ui.close({ id: HELP_PANE })} />
+          <Button key="close" label="Close" onPress={() => $.ui.close({ id: HELP_PANE })} />
         </Box>
       </Box>
     )
@@ -640,7 +644,7 @@ export const register: Register = (on, options) => {
         {step < 2 ? (
           <Button key="next" label="Next" variant="primary" onPress={go(step + 1)} />
         ) : (
-          <Button key="finish" label="Let's go" variant="primary" onPress={() => void finishOnboarding($)} />
+          <Button key="finish" label="Let's go" variant="primary" onPress={() => finishOnboarding($)} />
         )}
       </Box>
     )
