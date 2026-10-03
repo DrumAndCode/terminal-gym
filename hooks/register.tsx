@@ -295,6 +295,12 @@ export const register: Register = (on, options) => {
     const stored = Number((await $.store.get('debt')) ?? 0)
     await update($, debt, () => (isStrict ? stored : 0))
     await syncUnlocked($)
+    // A restart mid-break loses the timer: start one for whatever's left of it.
+    const breakLeft = Number((await $.store.get('paidAt')) ?? 0) + GRACE_MS - (await $.clock.now())
+    if (breakLeft > 0) {
+      breakTimer?.cancel()
+      breakTimer = $.clock.after(breakLeft, () => void breakOver($))
+    }
     const introduced = (await $.store.get('introduced')) === true
     await update($, isIntroduced, () => introduced)
     await refreshToday($)

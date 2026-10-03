@@ -7,8 +7,9 @@ A Claude Code mod for a daily bodyweight rep goal. When Claude runs a long turn,
 ## What it does
 
 - **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`, grey at 0 then red, yellow and green as you close in on the goal.
+- **Breaks**: 2 minutes after a set, a toast says the break's over and asks for the next one.
 - **Long-turn nudges**: after 30s of Claude working, a toast and the spinner suggest a set.
-- **Strict mode** (opt-in): long turns add rep debt; your next prompt waits until you pay. Logging any reps unlocks your next prompt, plus every prompt for 2 minutes after; whatever's left comes due then. A toast tells you when the break's over.
+- **Strict mode** (opt-in): long turns add rep debt; your next prompt waits until you pay. Logging any reps unlocks your next prompt, plus every prompt for 2 minutes after; whatever's left comes due when the 2 minutes are up.
 - **Scoreboard** (`/fit score`): a barbell, your streak and a 28-day grid.
 - **Walkthrough**: three steps on first run to pick a program.
 
@@ -52,7 +53,7 @@ Settings live in `/config` under terminal-gym: nudges, strict mode, nudge delay,
 The mod makes no network calls and adds no hidden context for the model. `/fit` replies appear in your conversation like any slash command's output, so Claude can see them. Everything else stays in `~/.claude/fitness`:
 
 - `routine.json`: the plan per weekday (`{ "mon": { "exercise": "pushups", "goal": 100 } }`, optional `"unit": "s"`).
-- `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day.
+- `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day; if it contains `off`, the rest day was undone (`/fit rest off`). The standalone `fit` shell script doesn't know about undone rest days.
 - `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap` (JSON plan, same shape as a routine day).
 
 ## Contributing

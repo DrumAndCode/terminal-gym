@@ -10,9 +10,13 @@ const MONDAY_9AM = new Date(2026, 9, 5, 9).getTime()
 
 // The world beneath Terminal Gym: files in memory, a held clock, and the engine
 // calls it makes answered quietly, toasts recorded.
-const world = (on: On, files = new Map<string, string>(), { introduced = true } = {}) => {
+const world = (
+  on: On,
+  files = new Map<string, string>(),
+  { introduced = true, store = {} as Record<string, unknown> } = {},
+) => {
   const clock = mock.clock(on, { now: MONDAY_9AM })
-  mock.store(on, introduced ? { introduced: true } : {})
+  mock.store(on, { ...(introduced ? { introduced: true } : {}), ...store })
   mock.env(on, { HOME })
   const toasts: string[] = []
   on('fs.read', ($, e) => {
@@ -643,4 +647,13 @@ describe('rest days', () => {
     await fit($, 'rest')
     expect((await fit($, 'rest')).text).toContain('Already a rest day')
   })
+})
+
+test('a restart mid-break still ends the break on time', { options: { strict: true } }, async ($, on) => {
+  const { clock, toasts } = world(on, new Map(), { store: { debt: 10, paidAt: MONDAY_9AM - 60_000 } })
+  await start($)
+  await clock.advance(59_000)
+  expect(toasts.some(t => t.includes("Break's over"))).toBe(false)
+  await clock.advance(2_000)
+  expect(toasts.some(t => t.includes("Break's over. Debt 10"))).toBe(true)
 })

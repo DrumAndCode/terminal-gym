@@ -225,7 +225,7 @@ Off by default. When it's on:
 - long turns put you in rep debt
 - your next prompt waits until you pay
 - log any reps to unlock your next prompt, plus every prompt for 2 minutes after
-- whatever's left comes due on the prompt after that
+- whatever's left comes due when the 2 minutes are up
 - \`/fit rest\` bails, but costs your streak
 
 **Turn it on:** type \`/fit strict\`
