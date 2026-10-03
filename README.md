@@ -12,6 +12,9 @@ Start a new Claude Code session and the welcome band appears above your prompt.
 
 ![The Terminal Gym band above the Claude Code prompt: 0/100 pushups, behind 10, with +5, +10 and +25 buttons](docs/band.png)
 
+## Demo (40 seconds)
+https://github.com/user-attachments/assets/b82aedd9-2b03-4071-b24e-37bb76e69ce0
+
 ## What you get
 
 - **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set 10:53  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`. It's grey at 0, then red, yellow and green as you close in on the goal.
