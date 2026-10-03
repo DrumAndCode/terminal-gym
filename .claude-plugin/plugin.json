@@ -9,6 +9,9 @@
   },
   "homepage": "https://github.com/DrumAndCode/terminal-gym",
   "repository": "https://github.com/DrumAndCode/terminal-gym",
+  "documentationUrl": "https://github.com/DrumAndCode/terminal-gym#readme",
+  "supportUrl": "https://github.com/DrumAndCode/terminal-gym/issues",
+  "privacyPolicyUrl": "https://github.com/DrumAndCode/terminal-gym#privacy-and-data",
   "license": "MIT",
   "keywords": [
     "fitness",
