@@ -28,7 +28,7 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Every turn adds rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
+      "description": "Every prompt you send adds rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
       "default": false
     },
     "nudgeSeconds": {
@@ -40,13 +40,13 @@
     "nudgeReps": {
       "type": "number",
       "title": "Reps per nudge",
-      "description": "Reps suggested per long turn, or owed per turn in strict mode.",
+      "description": "Reps suggested per long turn, or owed per prompt in strict mode.",
       "default": 10
     },
     "spinner": {
       "type": "boolean",
       "title": "Spinner takeover",
-      "description": "Replace the spinner word with the suggested set during long turns.",
+      "description": "Replace the spinner word with the suggested set during long turns (strict mode: from the start of every turn you start).",
       "default": true
     },
     "band": {

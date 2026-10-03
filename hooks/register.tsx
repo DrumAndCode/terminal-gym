@@ -215,7 +215,7 @@ const nudge = async ($: $, reps: number) => {
   toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
 }
 
-// Strict mode: every turn costs reps, from the moment Claude starts.
+// Strict mode: every prompt the person sends costs reps, however short the turn.
 const chargeTurn = async ($: $, reps: number) => {
   const t = await read($, today)
   if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
@@ -403,8 +403,8 @@ export const register: Register = (on, options) => {
         if (deny !== undefined) return { text: `Couldn't change strict mode: ${deny}` }
         return {
           text: cmd.isOn
-            ? 'Coach is strict. Long turns now cost reps, and prompts wait until you pay.'
-            : 'Coach is easy. Nudges only.',
+            ? `Coach is strict. Every prompt you send costs ${nudgeReps} reps, and the next one waits until you pay.`
+            : 'Coach is easy. A nudge when a turn runs long, no debt.',
         }
       }
       case 'hide':
@@ -440,13 +440,15 @@ export const register: Register = (on, options) => {
       await $.store.set('hasPass', false)
       await syncUnlocked($)
     }
+    // Only prompts the person typed cost reps: background tasks, loops and
+    // other sessions start turns too, and those are not theirs to pay for.
+    if (isGated) await chargeTurn($, nudgeReps)
     return next(e)
   })
 
   on('turn.start', async ($, e, next) => {
     timer?.cancel()
-    if (isStrict) await chargeTurn($, nudgeReps)
-    else if (options.nudges !== false) timer = $.clock.after(nudgeMs, () => void nudge($, nudgeReps))
+    if (!isStrict && options.nudges !== false) timer = $.clock.after(nudgeMs, () => void nudge($, nudgeReps))
     return next(e)
   })
 

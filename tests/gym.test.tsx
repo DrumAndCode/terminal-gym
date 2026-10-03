@@ -74,6 +74,9 @@ const fit = ($: Engine, args: string) =>
     presentation: { isFullscreen: false, columns: 120 },
   })
 
+// A prompt the person typed: in strict mode, the one thing that costs reps.
+const send = ($: Engine, text = 'go') => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+
 const start = ($: Engine) =>
   $.session.start({ cwd: HOME, surface: 'terminal', isInteractive: true })
 
@@ -151,10 +154,9 @@ describe('nudges', () => {
   })
 
   test('strict mode holds prompts until the debt is paid', { options: { strict: true } }, async ($, on) => {
-    const { clock, files } = world(on)
+    const { files } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
+    await send($)
 
     const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
     expect(held.drop).toContain('Pay up first: 10 pushups')
@@ -168,51 +170,45 @@ describe('nudges', () => {
   test('any payment buys two minutes of prompts, then the rest is due', { options: { strict: true } }, async ($, on) => {
     const { clock, toasts } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
-    await $.turn.start({ text: 'go', turnId: 't2' })
-    await clock.advance(31_000)
-    expect(toasts).toContain("Your agent's mid-set. +10 pushups added · debt 20 left.")
+    await send($)
+    expect(toasts).toContain("Your agent's mid-set. +10 pushups added · debt 10 left.")
 
     const reply = await fit($, '5')
-    expect(reply.text).toContain('debt 15 left · next prompt + 2 min unlocked')
-    const paid = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    expect(reply.text).toContain('debt 5 left · next prompt + 2 min unlocked')
+    const paid = await send($) // passes, and costs 10 more
     expect(paid.drop).toBeUndefined()
 
     await clock.advance(119_000)
-    const still = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    const still = await send($) // still inside the break: passes, 10 more
     expect(still.drop).toBeUndefined()
 
     await clock.advance(2_000)
-    const due = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(due.drop).toContain('Pay up first: 15 pushups')
+    const due = await send($)
+    expect(due.drop).toContain('Pay up first: 25 pushups')
   })
 
   test('a payment always unlocks the next prompt, even after the break', { options: { strict: true } }, async ($, on) => {
     const { clock } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
+    await send($)
 
     await fit($, '3')
     await clock.advance(5 * 60_000)
-    const late = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+    const late = await send($) // the pass lets it through; it costs 10
     expect(late.drop).toBeUndefined()
 
-    const again = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
-    expect(again.drop).toContain('Pay up first: 7 pushups')
+    const again = await send($)
+    expect(again.drop).toContain('Pay up first: 17 pushups')
   })
 
   test('paying it all off leaves no pass for the next debt', { options: { strict: true } }, async ($, on) => {
     const { clock } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
+    await send($)
     expect((await fit($, '10')).text).toContain('debt paid')
 
     await clock.advance(3 * 60_000)
-    await $.turn.start({ text: 'go', turnId: 't2' })
-    await clock.advance(31_000)
+    expect((await send($)).drop).toBeUndefined() // no debt: passes, costs 10
     const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
     expect(held.drop).toContain('Pay up first: 10 pushups')
   })
@@ -220,8 +216,7 @@ describe('nudges', () => {
   test('a toast says when the break after a set is over', { options: { strict: true } }, async ($, on) => {
     const { clock, toasts } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
+    await send($)
     await fit($, '4')
     await clock.advance(119_000)
     expect(toasts.some(t => t.includes("Break's over"))).toBe(false)
@@ -239,10 +234,9 @@ describe('nudges', () => {
   })
 
   test('/fit rest clears the debt and marks the day', { options: { strict: true } }, async ($, on) => {
-    const { clock, files } = world(on)
+    const { files } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
+    await send($)
     await fit($, 'rest')
     expect(files.has(`${LOG}/2026-10-05.skip`)).toBe(true)
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
@@ -586,10 +580,9 @@ test('below the wordmark width the band shows the bare name', async ($, on) => {
 })
 
 test('the band labels debt as what is left and says if prompts are open', { options: { strict: true } }, async ($, on) => {
-  const { clock } = world(on)
+  world(on)
   await start($)
-  await $.turn.start({ text: 'go', turnId: 't1' })
-  await clock.advance(31_000)
+  await send($)
   const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /debt 10 left · pay to unlock/ })).toBeDefined()
   await ui.press({ key: 'add5' })
@@ -639,10 +632,9 @@ describe('rest days', () => {
   })
 
   test('debt left from earlier never holds prompts on a rest day', { options: { strict: true } }, async ($, on) => {
-    const { clock, files } = world(on)
+    const { files } = world(on)
     await start($)
-    await $.turn.start({ text: 'go', turnId: 't1' })
-    await clock.advance(31_000)
+    await send($)
     // A rest day marked outside /fit rest (or before rest days cleared debt).
     files.set(`${LOG}/2026-10-05.skip`, '')
     await fit($, '')
@@ -702,12 +694,24 @@ test('/clear and /resume run the setup again', async ($, on) => {
   expect(registered).toEqual(['fit', 'fit', 'fit'])
 })
 
-test('strict mode charges every turn, however short', { options: { strict: true } }, async ($, on) => {
+test('strict mode charges every prompt you send, however short the turn', { options: { strict: true } }, async ($, on) => {
   world(on)
   await start($)
+  const first = await $.prompt.submit({ text: 'quick one', wait: false, origin: { kind: 'composer' } })
+  expect(first.drop).toBeUndefined()
   await $.turn.start({ text: 'quick one', turnId: 't1' })
   const held = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
   expect(held.drop).toContain('10 pushups')
+})
+
+test('strict mode never charges turns you did not start', { options: { strict: true } }, async ($, on) => {
+  world(on)
+  await start($)
+  await $.prompt.submit({ text: 'task done', wait: false, origin: { kind: 'task-notification' } })
+  await $.turn.start({ text: '', turnId: 't1' })
+  await $.prompt.submit({ text: '/fit score', wait: false, origin: { kind: 'composer' } })
+  const mine = await $.prompt.submit({ text: 'my prompt', wait: false, origin: { kind: 'composer' } })
+  expect(mine.drop).toBeUndefined()
 })
 
 test('easy mode still waits for a long turn before nudging', async ($, on) => {
