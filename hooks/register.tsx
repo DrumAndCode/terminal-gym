@@ -222,7 +222,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'fit',
       description: "Log reps toward today's goal",
-      argumentHint: '[n | set n | reset | swap [exercise] | rest | score | program | rules | coach strict|easy | tour | hide]',
+      argumentHint: '[n | set n | reset | swap [exercise] | rest | score | program | rules | strict | easy | tour | hide]',
       immediate: true,
     })
     const stored = Number((await $.store.get('debt')) ?? 0)

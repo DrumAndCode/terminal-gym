@@ -39,7 +39,7 @@ To hack on it, clone the repo and load it for one session with `claude --plugin-
 | `/fit rest` | rest day (breaks streak, clears debt) |
 | `/fit score` | streak + grid |
 | `/fit program` | pick your program |
-| `/fit coach strict` / `/fit coach easy` | strict mode on / off |
+| `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit rules` | house rules |
 | `/fit tour` | replay the welcome |
 | `/fit hide` | close panels |

@@ -72,10 +72,11 @@ describe('lib', () => {
     expect(parseFit('set 80')).toEqual({ kind: 'set', n: 80 })
     expect(parseFit('set x').kind).toBe('error')
     expect(parseFit('dance').kind).toBe('error')
-    expect(parseFit('coach strict')).toEqual({ kind: 'strict', isOn: true })
+    expect(parseFit('strict')).toEqual({ kind: 'strict', isOn: true })
+    expect(parseFit('easy')).toEqual({ kind: 'strict', isOn: false })
     expect(parseFit('reset')).toEqual({ kind: 'reset' })
     expect(parseFit('tour')).toEqual({ kind: 'intro' })
-    expect(parseFit('coach maybe').kind).toBe('error')
+    expect(parseFit('coach strict').kind).toBe('error')
   })
 
   test('streak counts finished days and forgives an unfinished today', async () => {
@@ -282,10 +283,10 @@ describe('first run', () => {
 })
 
 describe('strict command', () => {
-  test('/fit coach strict flips the setting', async ($, on) => {
+  test('/fit strict flips the setting', async ($, on) => {
     const { config } = world(on)
     await start($)
-    const ran = await fit($, 'coach strict')
+    const ran = await fit($, 'strict')
     expect(ran.text).toContain('Coach is strict')
     expect(config.get('terminal-gym.strict')).toBe(true)
   })

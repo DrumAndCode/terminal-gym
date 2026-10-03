@@ -51,7 +51,7 @@ export type FitCommand =
   | { kind: 'set'; n: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest | score | program | rules | coach strict|easy | tour | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest | score | program | rules | strict | easy | tour | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -68,11 +68,8 @@ export const parseFit = (args: string): FitCommand => {
   if (head === 'hide') return { kind: 'hide' }
   if (head === 'reset') return { kind: 'reset' }
   if (head === 'tour') return { kind: 'intro' }
-  if (head === 'coach') {
-    return value === 'strict' || value === 'easy'
-      ? { kind: 'strict', isOn: value === 'strict' }
-      : { kind: 'error', text: 'usage: /fit coach strict | easy' }
-  }
+  if (head === 'strict') return { kind: 'strict', isOn: true }
+  if (head === 'easy') return { kind: 'strict', isOn: false }
   if (head === 'set') {
     return value !== undefined && /^\d+$/.test(value)
       ? { kind: 'set', n: Number(value) }
@@ -216,7 +213,7 @@ or press **+5 / +10 / +25** above the prompt
 | \`/fit rest\` | rest day (breaks streak) |
 | \`/fit score\` | streak + grid |
 | \`/fit program\` | pick your training |
-| \`/fit coach strict\` | strict mode |
+| \`/fit strict\` / \`/fit easy\` | strict mode on / off |
 | \`/fit rules\` | these rules |
 | \`/fit tour\` | replay the welcome |
 | \`/fit hide\` | close panels |
@@ -227,8 +224,8 @@ Off by default. When it's on:
 - your next prompt waits until you pay it off
 - \`/fit rest\` bails, but costs your streak
 
-**Turn it on:** type \`/fit coach strict\`
-**Turn it off:** type \`/fit coach easy\`
+**Turn it on:** type \`/fit strict\`
+**Turn it off:** type \`/fit easy\`
 
 ### Your data
 Stays on this machine, in \`~/.claude/fitness\`.`
