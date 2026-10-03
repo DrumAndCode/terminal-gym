@@ -174,7 +174,7 @@ export const describeRoutine = (routine: Routine) =>
 
 export const HELP = `## House rules
 
-**Claude works. You lift.**
+**Your agent put in the reps. You next.**
 When a turn runs long, drop and do a set.
 
 ### Log a set

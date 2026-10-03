@@ -138,7 +138,7 @@ const logReps = async ($: $, change: (count: number) => number) => {
   const added = count - before.count
   if (added > 0) await setDebt($, Math.max(0, (await read($, debt)) - added))
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
-    $.ui.toast(`✅ ${after.exercise} done for today: ${count}/${after.goal}${after.unit}`)
+    $.ui.toast(`✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
   return after
 }
@@ -150,9 +150,9 @@ const nudge = async ($: $, reps: number, isStrict: boolean) => {
   if (isStrict) {
     const owed = (await read($, debt)) + reps
     await setDebt($, owed)
-    $.ui.toast(`Claude's under the bar. Your set: ${reps} ${t.exercise}. You owe ${owed}.`)
+    $.ui.toast(`Your agent's mid-set. You next: ${reps} ${t.exercise}. You owe ${owed}.`)
   } else {
-    $.ui.toast(`Claude's under the bar. Your set: ${reps} ${t.exercise}.`)
+    $.ui.toast(`Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
   }
 }
 
@@ -176,7 +176,7 @@ const openOnboarding = async ($: $) => {
     size: 'Standard',
     hasRoutine,
   }))
-  await $.ui.open({ id: ONBOARD_PANE, title: 'Claude Gym', focus: true, closeOnEscape: true })
+  await $.ui.open({ id: ONBOARD_PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
 }
 
 const pickedRoutine = (p: OnboardPick): Routine | undefined => {
@@ -197,7 +197,7 @@ const finishOnboarding = async ($: $) => {
   await refreshHistory($)
   await $.ui.close({ id: ONBOARD_PANE })
   const plan = routine ?? (JSON.parse(await $.fs.read(routinePath)) as Routine)
-  $.ui.toast(`Training set: ${describeRoutine(plan)}. Go lift.`, { timeoutMs: 6000 })
+  $.ui.toast(`Program set: ${describeRoutine(plan)}. Get to work.`, { timeoutMs: 6000 })
 }
 
 // A made-up fortnight for the walkthrough's example grid.
@@ -244,7 +244,7 @@ export const register: Register = (on, options) => {
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
         await setDebt($, 0)
         await refreshHistory($)
-        return { text: `Rest day. No ${t.exercise} today; streak resets, debt cleared.` }
+        return { text: `Rest day logged. Streak resets, debt cleared. Back at it tomorrow.` }
       }
       case 'week': {
         if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
@@ -252,7 +252,7 @@ export const register: Register = (on, options) => {
           return { text: 'Scoreboard closed.' }
         }
         const days = await refreshHistory($)
-        await $.ui.open({ id: PANE, title: 'Claude Gym' })
+        await $.ui.open({ id: PANE, title: 'TERMINAL GYM' })
         return { text: `🔥 ${streak(days)}-day streak · /fit score again to close` }
       }
       case 'swap': {
@@ -283,7 +283,7 @@ export const register: Register = (on, options) => {
         return { text: `Reset. ${line(await logReps($, () => 0))}` }
       case 'help':
         await markIntroduced($)
-        await $.ui.open({ id: HELP_PANE, title: 'House rules' })
+        await $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })
         return { text: 'House rules opened · /fit hide to close' }
       case 'strict': {
         const { deny } = await $.config.set({ key: 'terminal-gym.strict', value: cmd.isOn })
@@ -297,7 +297,7 @@ export const register: Register = (on, options) => {
       case 'hide':
         await $.ui.close({ id: PANE })
         await $.ui.close({ id: HELP_PANE })
-        return { text: 'Claude Gym panels closed.' }
+        return { text: 'Terminal Gym panels closed.' }
       case 'status': {
         const t = await refreshToday($)
         const owed = await read($, debt)
@@ -352,13 +352,13 @@ export const register: Register = (on, options) => {
     if (!(await read($, isIntroduced))) {
       return (
         <Box>
-          <Text bold>CLAUDE GYM </Text>
-          <Text dimColor>New face. Claude's under the bar, you're up next. </Text>
+          <Text bold>▓ TERMINAL GYM ▓ </Text>
+          <Text dimColor>Your agent put in the reps. You next. </Text>
           <Button key="setup" label="Pick your training" variant="primary" onPress={() => void openOnboarding($)} />
           <Text> </Text>
-          <Button key="help" label="House rules" onPress={() => void $.ui.open({ id: HELP_PANE, title: 'House rules' })} />
+          <Button key="help" label="House rules" onPress={() => void $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })} />
           <Text> </Text>
-          <Button key="dismiss" label="Just lift" onPress={() => void markIntroduced($)} />
+          <Button key="dismiss" label="Just train" onPress={() => void markIntroduced($)} />
         </Box>
       )
     }
@@ -462,7 +462,7 @@ export const register: Register = (on, options) => {
         {step < 2 ? (
           <Button key="next" label="Next" variant="primary" onPress={go(step + 1)} />
         ) : (
-          <Button key="finish" label="Start lifting" variant="primary" onPress={() => void finishOnboarding($)} />
+          <Button key="finish" label="Let's go" variant="primary" onPress={() => void finishOnboarding($)} />
         )}
       </Box>
     )
@@ -470,7 +470,7 @@ export const register: Register = (on, options) => {
     if (step === 0) {
       return (
         <Box flexDirection="column">
-          {header('Claude lifts the code. You lift the weight.')}
+          {header('Your agent works the code. You work the reps.')}
           <Text>Every day has a rep goal.</Text>
           <Text>When Claude runs a long turn, that's your cue for a set.</Text>
           <Text> </Text>

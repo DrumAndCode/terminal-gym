@@ -8,7 +8,7 @@ const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
 const MONDAY_9AM = new Date(2026, 9, 5, 9).getTime()
 
-// The world beneath Claude Gym: files in memory, a held clock, and the engine
+// The world beneath Terminal Gym: files in memory, a held clock, and the engine
 // calls it makes answered quietly, toasts recorded.
 const world = (on: On, files = new Map<string, string>(), { introduced = true } = {}) => {
   const clock = mock.clock(on, { now: MONDAY_9AM })
@@ -107,7 +107,7 @@ describe('logging', () => {
 
     await fit($, '40')
     expect(files.get(`${LOG}/2026-10-05`)).toBe('100\n')
-    expect(toasts.some(t => t.includes('done for today'))).toBe(true)
+    expect(toasts.some(t => t.includes("That's the work"))).toBe(true)
   })
 
   test('/fit reads counts the shell script already wrote', async ($, on) => {
@@ -124,7 +124,7 @@ describe('nudges', () => {
     await start($)
     await $.turn.start({ text: 'go', turnId: 't1' })
     await clock.advance(46_000)
-    expect(toasts.some(t => t.includes("Your set: 10 pushups."))).toBe(true)
+    expect(toasts.some(t => t.includes("You next: 10 pushups."))).toBe(true)
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
     expect(submitted.drop).toBeUndefined()
   })
@@ -160,7 +160,7 @@ describe('nudges', () => {
     await start($)
     await $.turn.start({ text: 'go', turnId: 't1' })
     await clock.advance(46_000)
-    expect(toasts.some(t => t.includes("Your set"))).toBe(false)
+    expect(toasts.some(t => t.includes("mid-set"))).toBe(false)
   })
 })
 
@@ -180,7 +180,7 @@ const PANE = {
   component: 'Pane',
   requestId: 'gym-week',
   props: {
-    title: 'Claude Gym',
+    title: 'TERMINAL GYM',
     isFocused: false,
     bodyColumns: 40,
     placement: 'dock',
@@ -243,11 +243,11 @@ describe('drawing', () => {
 })
 
 describe('first run', () => {
-  test('the band introduces Claude Gym until set up or dismissed', async ($, on) => {
+  test('the band introduces Terminal Gym until set up or dismissed', async ($, on) => {
     world(on, new Map(), { introduced: false })
     await start($)
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /you're up next/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /You next/ })).toBeDefined()
     await ui.press({ key: 'dismiss' })
     expect(await ui.find({ type: 'Text', text: /0\/100 pushups/ })).toBeDefined()
     await ui.unmount()
@@ -288,7 +288,7 @@ describe('strict command', () => {
 const ONBOARD = {
   component: 'Pane',
   requestId: 'gym-onboard',
-  props: { ...PANE.props, title: 'Claude Gym' },
+  props: { ...PANE.props, title: 'TERMINAL GYM' },
 } as const
 
 describe('walkthrough', () => {
@@ -343,7 +343,7 @@ test('/fit tour brings the welcome band back', async ($, on) => {
   await start($)
   await fit($, 'tour')
   const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
-  expect(await ui.find({ type: 'Text', text: /you're up next/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /You next/ })).toBeDefined()
   await ui.unmount()
 })
 

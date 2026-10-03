@@ -1,6 +1,8 @@
-# Claude Gym
+# ▓ TERMINAL GYM ▓
 
-A Claude Code mod for a daily rep goal. Claude lifts the code, you lift the weight: when a turn runs long, that's your cue for a set.
+**Your agent put in the reps. You next.**
+
+A Claude Code mod for a daily bodyweight rep goal. When Claude runs a long turn, that's your cue for a set.
 
 ## What it does
 
