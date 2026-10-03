@@ -4,6 +4,7 @@ export type Today = {
   goal: number
   unit: string
   count: number
+  isRest: boolean
 }
 
 export type Day = {
@@ -24,6 +25,7 @@ declare module 'claude-code' {
     'terminal-gym': {
       today: Today | null
       debt: number
+      isUnlocked: boolean
       isWaiting: boolean
       isIntroduced: boolean
       onboardStep: number

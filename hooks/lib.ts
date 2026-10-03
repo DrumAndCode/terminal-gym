@@ -40,33 +40,37 @@ export type FitCommand =
   | { kind: 'status' }
   | { kind: 'week' }
   | { kind: 'skip' }
+  | { kind: 'unskip' }
   | { kind: 'help' }
   | { kind: 'hide' }
   | { kind: 'reset' }
   | { kind: 'intro' }
   | { kind: 'program' }
+  | { kind: 'swap'; exercise?: string }
   | { kind: 'strict'; isOn: boolean }
   | { kind: 'add'; n: number }
   | { kind: 'set'; n: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | rest | score | program | rules | coach strict|easy | tour | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | tour | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
   if (head === '' || head === 'status') return { kind: 'status' }
   if (head === 'score') return { kind: 'week' }
-  if (head === 'rest') return { kind: 'skip' }
+  if (head === 'rest') return value === 'off' ? { kind: 'unskip' } : { kind: 'skip' }
   if (head === 'program') return { kind: 'program' }
+  if (head === 'swap') {
+    // Names may be several words ("jumping jacks"): keep everything after "swap".
+    const name = args.trim().replace(/^swap\s*/, '').replace(/\s+/g, ' ').toLowerCase()
+    return name === '' ? { kind: 'swap' } : { kind: 'swap', exercise: name }
+  }
   if (head === 'rules') return { kind: 'help' }
   if (head === 'hide') return { kind: 'hide' }
   if (head === 'reset') return { kind: 'reset' }
   if (head === 'tour') return { kind: 'intro' }
-  if (head === 'coach') {
-    return value === 'strict' || value === 'easy'
-      ? { kind: 'strict', isOn: value === 'strict' }
-      : { kind: 'error', text: 'usage: /fit coach strict | easy' }
-  }
+  if (head === 'strict') return { kind: 'strict', isOn: true }
+  if (head === 'easy') return { kind: 'strict', isOn: false }
   if (head === 'set') {
     return value !== undefined && /^\d+$/.test(value)
       ? { kind: 'set', n: Number(value) }
@@ -123,9 +127,13 @@ export const heatCells = (history: readonly Day[]) => {
   return { columns, rows: weeks, cells: (new Uint8Array(words.buffer) as Base64Bytes).toBase64() }
 }
 
-// Same muted accents the old statusline used: amber in progress, green done.
-export const progressColor = (count: number, goal: number) =>
-  goal > 0 && count >= goal ? '#87af87' : count > 0 ? '#d7af5f' : undefined
+// Grey until the first rep, then a muted traffic light: red under a third of the
+// goal, yellow on the way, green for the last fifth. No goal: undefined draws dim.
+export const progressColor = (count: number, goal: number) => {
+  if (goal <= 0 || count <= 0) return undefined
+  const share = count / goal
+  return share >= 0.8 ? '#87af87' : share >= 1 / 3 ? '#d7af5f' : '#d75f5f'
+}
 
 export const daily = (exercise: string, goal: number): Routine =>
   Object.fromEntries(WEEKDAYS.map(day => [day, { exercise, goal }]))
@@ -154,12 +162,42 @@ export const parseCustom = (text: string): Routine | undefined => {
   return Number(goal) > 0 ? daily(exercise.toLowerCase(), Number(goal)) : undefined
 }
 
+// Today's exercise, swapped: the next one in the routine, or the one named.
+export const pickSwap = (routine: Routine, current: string, wanted?: string) => {
+  const plans = [...new Map(Object.values(routine).map(plan => [plan.exercise, plan])).values()]
+  if (wanted !== undefined) return plans.find(plan => plan.exercise.toLowerCase() === wanted)
+  if (plans.length === 0) return undefined
+  const at = plans.findIndex(plan => plan.exercise === current)
+  return plans[(at + 1) % plans.length]
+}
+
+// The scoreboard's barbell, the name across the bar. 34 columns wide.
+export const BARBELL = {
+  plates: ' ▐█▌▐█▌                    ▐█▌▐█▌ ',
+  left: '━▐█▌▐█▌━━━ ',
+  name: 'TERMINAL GYM',
+  right: ' ━━━▐█▌▐█▌━',
+  width: 34,
+} as const
+
+// Terminal cells a string takes: emoji draw two cells wide.
+export const cells = (text: string) =>
+  [...text].reduce((w, ch) => w + ((ch.codePointAt(0) ?? 0) >= 0x1f000 || ch === '✅' ? 2 : 1), 0)
+
+// The terminal draws a Button as `[ label ]`, and a row puts one cell between buttons.
+export const buttonsWidth = (labels: readonly string[]) =>
+  labels.reduce((w, label) => w + cells(label) + 4, 0) + labels.length - 1
+
+// The band's one-line barbell wordmark.
+// Small plate, big plate, bar: ❚█═TERMINAL-GYM═█❚
+export const MINI_BARBELL = { small: '❚', plate: '█═', name: 'TERMINAL-GYM', plateRight: '═█' } as const
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
 export const HELP = `## House rules
 
-**Claude works. You lift.**
+**Your agent put in the reps. You next.**
 When a turn runs long, drop and do a set.
 
 ### Log a set
@@ -172,10 +210,12 @@ or press **+5 / +10 / +25** above the prompt
 | \`/fit\` | today's progress |
 | \`/fit set 80\` | fix today's count |
 | \`/fit reset\` | today back to 0 |
+| \`/fit swap\` | switch today's exercise |
 | \`/fit rest\` | rest day (breaks streak) |
+| \`/fit rest off\` | undo today's rest day |
 | \`/fit score\` | streak + grid |
 | \`/fit program\` | pick your training |
-| \`/fit coach strict\` | strict mode |
+| \`/fit strict\` / \`/fit easy\` | strict mode on / off |
 | \`/fit rules\` | these rules |
 | \`/fit tour\` | replay the welcome |
 | \`/fit hide\` | close panels |
@@ -183,11 +223,13 @@ or press **+5 / +10 / +25** above the prompt
 ### Strict mode
 Off by default. When it's on:
 - long turns put you in rep debt
-- your next prompt waits until you pay it off
+- your next prompt waits until you pay
+- log any reps to unlock your next prompt, plus every prompt for 2 minutes after
+- whatever's left comes due when the 2 minutes are up
 - \`/fit rest\` bails, but costs your streak
 
-**Turn it on:** type \`/fit coach strict\`
-**Turn it off:** type \`/fit coach easy\`
+**Turn it on:** type \`/fit strict\`
+**Turn it off:** type \`/fit easy\`
 
 ### Your data
 Stays on this machine, in \`~/.claude/fitness\`.`

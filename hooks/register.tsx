@@ -4,15 +4,20 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Day, OnboardPick, Today } from '../types'
 import {
   DEFAULT_ROUTINE,
+  BARBELL,
   HELP,
+  MINI_BARBELL,
   ROUTINES,
   SIZES,
   bar,
+  buttonsWidth,
+  cells,
   dayKey,
   describeRoutine,
   heatCells,
   lastDays,
   parseFit,
+  pickSwap,
   progressColor,
   scale,
   streak,
@@ -26,9 +31,17 @@ const PANE = 'gym-week'
 const HELP_PANE = 'gym-help'
 const ONBOARD_PANE = 'gym-onboard'
 const HISTORY_DAYS = 28
+const GRACE_MS = 2 * 60_000
+const TOAST_MS = 10_000
+
+// Toasts stay up long enough to read mid-set.
+const toast = ($: $, text: string) => $.ui.toast(text, { timeoutMs: TOAST_MS })
+
+let breakTimer: { cancel: () => void } | undefined
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
 const debt = atom({ plugin: 'terminal-gym', key: 'debt' } as const, 0)
+const isUnlocked = atom({ plugin: 'terminal-gym', key: 'isUnlocked' } as const, false)
 const isWaiting = atom({ plugin: 'terminal-gym', key: 'isWaiting' } as const, false)
 const history = atom({ plugin: 'terminal-gym', key: 'history' } as const, [])
 const isIntroduced = atom({ plugin: 'terminal-gym', key: 'isIntroduced' } as const, false)
@@ -59,16 +72,37 @@ const readCount = async ($: $, path: string) => {
   return Number.isFinite(n) ? n : 0
 }
 
+// `/fit swap` leaves the day's plan beside its count as `<date>.swap`.
+const readSwap = async ($: $, logDir: string, date: string): Promise<Routine[string] | undefined> => {
+  const path = `${logDir}/${date}.swap`
+  if (!(await $.fs.exists(path))) return undefined
+  // A damaged or odd file falls back to the routine instead of breaking every refresh.
+  try {
+    const plan = JSON.parse(await $.fs.read(path)) as Partial<Routine[string]>
+    return typeof plan.exercise === 'string' && typeof plan.goal === 'number'
+      ? { exercise: plan.exercise, goal: plan.goal, unit: plan.unit }
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// `/fit rest` leaves `<date>.skip`; `/fit rest off` writes "off" into it to undo.
+const readRest = async ($: $, path: string) =>
+  (await $.fs.exists(path)) && (await $.fs.read(path)).trim() !== 'off'
+
 const refreshToday = async ($: $): Promise<Today> => {
   const { routine, log: logDir } = await files($)
-  const plan = (await loadRoutine($, routine))[weekdayKey(await $.clock.now())]
   const date = dayKey(await $.clock.now())
+  const plan =
+    (await readSwap($, logDir, date)) ?? (await loadRoutine($, routine))[weekdayKey(await $.clock.now())]
   const next: Today = {
     date,
     exercise: plan?.exercise ?? 'reps',
     goal: plan?.goal ?? 0,
     unit: plan?.unit ?? '',
     count: await readCount($, `${logDir}/${date}`),
+    isRest: await readRest($, `${logDir}/${date}.skip`),
   }
   await update($, today, () => next)
   return next
@@ -83,8 +117,8 @@ const refreshHistory = async ($: $) => {
       return {
         date,
         count: await readCount($, `${logDir}/${date}`),
-        goal: routine[weekdayKey(ms)]?.goal ?? 0,
-        isSkipped: await $.fs.exists(`${logDir}/${date}.skip`),
+        goal: ((await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)])?.goal ?? 0,
+        isSkipped: await readRest($, `${logDir}/${date}.skip`),
       }
     }),
   )
@@ -94,12 +128,32 @@ const refreshHistory = async ($: $) => {
 
 const setDebt = async ($: $, n: number) => {
   await $.store.set('debt', n)
+  // A pass only covers debt that's still owed; never carry one into the next debt.
+  if (n === 0) await $.store.set('hasPass', false)
   await update($, debt, () => n)
+  await syncUnlocked($)
+}
+
+// Whether paid reps currently let prompts through: an unused pass, or inside the break.
+const syncUnlocked = async ($: $) => {
+  const owed = await read($, debt)
+  const paidAt = Number((await $.store.get('paidAt')) ?? 0)
+  const hasPass = (await $.store.get('hasPass')) === true
+  const isOpen = owed > 0 && (hasPass || (await $.clock.now()) - paidAt < GRACE_MS)
+  await update($, isUnlocked, () => isOpen)
+  return isOpen
 }
 
 const line = (t: Today) => {
   const isDone = t.goal > 0 && t.count >= t.goal
   return `${isDone ? '✅' : '💪'} ${bar(t.count, t.goal)} ${t.count}/${t.goal}${t.unit} ${t.exercise}`
+}
+
+// What a payment bought, for the /fit reply.
+const paidNote = (owedBefore: number, owedAfter: number) => {
+  if (owedAfter >= owedBefore) return ''
+  if (owedAfter === 0) return ' · debt paid'
+  return ` · debt ${owedAfter} left · next prompt + 2 min unlocked`
 }
 
 const withStreak = (t: Today, days: readonly Day[]) => {
@@ -119,24 +173,58 @@ const logReps = async ($: $, change: (count: number) => number) => {
   )
 
   const added = count - before.count
-  if (added > 0) await setDebt($, Math.max(0, (await read($, debt)) - added))
+  const owed = await read($, debt)
+  if (added > 0) {
+    breakTimer?.cancel()
+    breakTimer = $.clock.after(GRACE_MS, () => void breakOver($))
+  }
+  if (added > 0 && owed > 0) {
+    const left = Math.max(0, owed - added)
+    await setDebt($, left)
+    await $.store.set('paidAt', await $.clock.now())
+    if (left > 0) await $.store.set('hasPass', true)
+    await syncUnlocked($)
+  }
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
-    $.ui.toast(`✅ ${after.exercise} done for today: ${count}/${after.goal}${after.unit}`)
+    toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
   return after
 }
 
+// Fires two minutes after the last logged set.
+const breakOver = async ($: $) => {
+  breakTimer = undefined
+  await syncUnlocked($)
+  const t = await read($, today)
+  if (t?.isRest === true) return
+  const owed = await read($, debt)
+  if (owed > 0) {
+    toast($, `⏱ Break's over. Debt ${owed} ${t?.exercise ?? 'reps'} left; prompts wait for your next set.`)
+  } else if (t !== null && t.goal > 0 && t.count < t.goal) {
+    toast($, `⏱ Break's over. Next set? ${t.count}/${t.goal}${t.unit} ${t.exercise}.`)
+  }
+}
+
 const nudge = async ($: $, reps: number, isStrict: boolean) => {
   const t = await read($, today)
-  if (t === null || (t.goal > 0 && t.count >= t.goal)) return
+  if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
   await update($, isWaiting, () => true)
   if (isStrict) {
     const owed = (await read($, debt)) + reps
     await setDebt($, owed)
-    $.ui.toast(`Claude's under the bar. Your set: ${reps} ${t.exercise}. You owe ${owed}.`)
+    toast($, `Your agent's mid-set. +${reps} ${t.exercise} added · debt ${owed} left.`)
   } else {
-    $.ui.toast(`Claude's under the bar. Your set: ${reps} ${t.exercise}.`)
+    toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
   }
+}
+
+const endRest = async ($: $) => {
+  const t = await refreshToday($)
+  if (!t.isRest) return { text: `Today isn't a rest day. ${line(t)}` }
+  await $.fs.write(`${(await files($)).log}/${t.date}.skip`, 'off\n')
+  const back = await refreshToday($)
+  await refreshHistory($)
+  return { text: `Rest day undone. Back to work. ${line(back)}` }
 }
 
 const markIntroduced = async ($: $) => {
@@ -159,7 +247,7 @@ const openOnboarding = async ($: $) => {
     size: 'Standard',
     hasRoutine,
   }))
-  await $.ui.open({ id: ONBOARD_PANE, title: 'Claude Gym', focus: true, closeOnEscape: true })
+  await $.ui.open({ id: ONBOARD_PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
 }
 
 const pickedRoutine = (p: OnboardPick): Routine | undefined => {
@@ -180,7 +268,7 @@ const finishOnboarding = async ($: $) => {
   await refreshHistory($)
   await $.ui.close({ id: ONBOARD_PANE })
   const plan = routine ?? (JSON.parse(await $.fs.read(routinePath)) as Routine)
-  $.ui.toast(`Training set: ${describeRoutine(plan)}. Go lift.`, { timeoutMs: 6000 })
+  toast($, `Program set: ${describeRoutine(plan)}. Get to work.`)
 }
 
 // A made-up fortnight for the walkthrough's example grid.
@@ -193,7 +281,7 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
 
 export const register: Register = (on, options) => {
   const isStrict = options.strict === true
-  const nudgeMs = Number(options.nudgeSeconds ?? 45) * 1000
+  const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
   const nudgeReps = Number(options.nudgeReps ?? 10)
   let timer: { cancel: () => void } | undefined
 
@@ -201,11 +289,18 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'fit',
       description: "Log reps toward today's goal",
-      argumentHint: '[n | set n | reset | rest | score | program | rules | coach strict|easy | tour | hide]',
+      argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | tour | hide]',
       immediate: true,
     })
     const stored = Number((await $.store.get('debt')) ?? 0)
     await update($, debt, () => (isStrict ? stored : 0))
+    await syncUnlocked($)
+    // A restart mid-break loses the timer: start one for whatever's left of it.
+    const breakLeft = Number((await $.store.get('paidAt')) ?? 0) + GRACE_MS - (await $.clock.now())
+    if (breakLeft > 0) {
+      breakTimer?.cancel()
+      breakTimer = $.clock.after(breakLeft, () => void breakOver($))
+    }
     const introduced = (await $.store.get('introduced')) === true
     await update($, isIntroduced, () => introduced)
     await refreshToday($)
@@ -219,24 +314,51 @@ export const register: Register = (on, options) => {
       case 'error':
         return { text: cmd.text }
       case 'add':
-        return { text: line(await logReps($, count => count + cmd.n)) }
-      case 'set':
-        return { text: line(await logReps($, () => cmd.n)) }
+      case 'set': {
+        if ((await refreshToday($)).isRest) return { text: "Today's a rest day. /fit rest off to train." }
+        const owedBefore = await read($, debt)
+        const n = cmd.n
+        const t = await logReps($, count => (cmd.kind === 'add' ? count + n : n))
+        return { text: `${line(t)}${paidNote(owedBefore, await read($, debt))}` }
+      }
       case 'skip': {
         const t = await refreshToday($)
+        if (t.isRest) return { text: 'Already a rest day. /fit rest off to train.' }
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
         await setDebt($, 0)
+        breakTimer?.cancel()
+        breakTimer = undefined
+        await refreshToday($)
         await refreshHistory($)
-        return { text: `Rest day. No ${t.exercise} today; streak resets, debt cleared.` }
+        return { text: `Rest day logged. Streak resets, debt cleared. Back at it tomorrow. (/fit rest off to undo)` }
       }
+      case 'unskip':
+        return endRest($)
       case 'week': {
         if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
           await $.ui.close({ id: PANE })
           return { text: 'Scoreboard closed.' }
         }
         const days = await refreshHistory($)
-        await $.ui.open({ id: PANE, title: 'Claude Gym' })
+        await $.ui.open({ id: PANE, title: 'TERMINAL GYM' })
         return { text: `🔥 ${streak(days)}-day streak · /fit score again to close` }
+      }
+      case 'swap': {
+        const before = await refreshToday($)
+        const { routine: routinePath, log: logDir } = await files($)
+        const routine = await loadRoutine($, routinePath)
+        const names = [...new Set(Object.values(routine).map(p => p.exercise))]
+        if (names.length === 0) return { text: 'Your program has no exercises. /fit program to pick one.' }
+        const plan = pickSwap(routine, before.exercise, cmd.exercise)
+        if (plan === undefined) {
+          return { text: `No ${cmd.exercise} in your program. Pick one of: ${names.join(', ')}.` }
+        }
+        if (plan.exercise === before.exercise) return { text: `Already on ${plan.exercise} today.` }
+        await $.fs.write(`${logDir}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
+        await refreshHistory($)
+        const amount = before.unit === '' ? `${before.count} reps` : `${before.count}${before.unit}`
+        const carried = before.count > 0 ? ` Your ${amount} carry over.` : ''
+        return { text: `Swapped to ${plan.exercise} today.${carried} ${line(await refreshToday($))}` }
       }
       case 'program':
         await openOnboarding($)
@@ -249,7 +371,7 @@ export const register: Register = (on, options) => {
         return { text: `Reset. ${line(await logReps($, () => 0))}` }
       case 'help':
         await markIntroduced($)
-        await $.ui.open({ id: HELP_PANE, title: 'House rules' })
+        await $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })
         return { text: 'House rules opened · /fit hide to close' }
       case 'strict': {
         const { deny } = await $.config.set({ key: 'terminal-gym.strict', value: cmd.isOn })
@@ -263,12 +385,12 @@ export const register: Register = (on, options) => {
       case 'hide':
         await $.ui.close({ id: PANE })
         await $.ui.close({ id: HELP_PANE })
-        return { text: 'Claude Gym panels closed.' }
+        return { text: 'Terminal Gym panels closed.' }
       case 'status': {
         const t = await refreshToday($)
         const owed = await read($, debt)
         const shown = withStreak(t, await refreshHistory($))
-        return { text: owed > 0 ? `${shown} · owe ${owed}` : shown }
+        return { text: owed > 0 ? `${shown} · debt ${owed} left` : shown }
       }
     }
   })
@@ -276,12 +398,22 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const isGated = isStrict && e.origin.kind === 'composer' && !e.text.trimStart().startsWith('/')
     const owed = isGated ? await read($, debt) : 0
+    const t = await read($, today)
+    // Rest days owe nothing; clear anything left from earlier in the day.
+    if (owed > 0 && t?.isRest === true) {
+      await setDebt($, 0)
+      return next(e)
+    }
     if (owed > 0) {
-      const t = await read($, today)
-      void $.prompt.fill({ text: e.text })
-      return {
-        drop: `Pay up first: ${owed} ${t?.exercise ?? 'reps'}. /fit ${owed} to log, /fit rest to bail (breaks streak).`,
+      // Any paid reps unlock the next prompt, plus every prompt for two minutes after.
+      if (!(await syncUnlocked($))) {
+        void $.prompt.fill({ text: e.text })
+        return {
+          drop: `Pay up first: ${owed} ${t?.exercise ?? 'reps'}. Log any reps (/fit 5) to unlock your next prompt + 2 min. /fit rest skips the day (breaks streak).`,
+        }
       }
+      await $.store.set('hasPass', false)
+      await syncUnlocked($)
     }
     return next(e)
   })
@@ -315,16 +447,64 @@ export const register: Register = (on, options) => {
 
     const { Box, Button, Text } = $.ui.resolve(e)
 
+    // Lay the band out in rows that fit, widest first: one line, then the
+    // header over the buttons, then every piece on its own line.
+    const cols = e.props.bodyColumns
+    const WORDMARK = MINI_BARBELL.small + MINI_BARBELL.plate + MINI_BARBELL.name + MINI_BARBELL.plateRight + MINI_BARBELL.small
+    const TAGLINE = 'Your agent put in the reps. You next.'
+    const BUTTONS_WIDTH = buttonsWidth(['Pick your training', 'House rules', 'Just train'])
+    const HEADER_WIDTH = cells(WORDMARK) + 2 + cells(TAGLINE)
+
     if (!(await read($, isIntroduced))) {
-      return (
-        <Box>
-          <Text bold>CLAUDE GYM </Text>
-          <Text dimColor>New face. Claude's under the bar, you're up next. </Text>
+      const buttons = (
+        <Box key="buttons" flexDirection={cols >= BUTTONS_WIDTH ? 'row' : 'column'}>
           <Button key="setup" label="Pick your training" variant="primary" onPress={() => void openOnboarding($)} />
-          <Text> </Text>
-          <Button key="help" label="House rules" onPress={() => void $.ui.open({ id: HELP_PANE, title: 'House rules' })} />
-          <Text> </Text>
-          <Button key="dismiss" label="Just lift" onPress={() => void markIntroduced($)} />
+          {cols >= BUTTONS_WIDTH && <Text> </Text>}
+          <Button key="help" label="House rules" onPress={() => void $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })} />
+          {cols >= BUTTONS_WIDTH && <Text> </Text>}
+          <Button key="dismiss" label="Just train" onPress={() => void markIntroduced($)} />
+        </Box>
+      )
+      const header = (
+        <Box key="header" flexDirection={cols >= HEADER_WIDTH ? 'row' : 'column'}>
+          {cols >= cells(WORDMARK) ? (
+            <Box>
+              <Text dimColor>{MINI_BARBELL.small}</Text>
+              <Text color="#d7af5f">{MINI_BARBELL.plate}</Text>
+              <Text bold>{MINI_BARBELL.name}</Text>
+              <Text color="#d7af5f">{MINI_BARBELL.plateRight}</Text>
+              <Text dimColor>{MINI_BARBELL.small}</Text>
+              {cols >= HEADER_WIDTH && <Text>  </Text>}
+            </Box>
+          ) : (
+            <Text bold wrap="truncate-end">
+              {MINI_BARBELL.name}
+            </Text>
+          )}
+          <Text dimColor wrap="truncate-end">{TAGLINE}</Text>
+        </Box>
+      )
+      const isOneLine = cols >= HEADER_WIDTH + 1 + BUTTONS_WIDTH
+      return (
+        <Box key="band" flexDirection={isOneLine ? 'row' : 'column'}>
+          {header}
+          {isOneLine && <Text> </Text>}
+          {buttons}
+        </Box>
+      )
+    }
+
+    // A rest day is deliberate, not a miss: no rep buttons, just a way back.
+    if (t.isRest) {
+      const REST = `😴 Rest day · ${t.exercise} back tomorrow`
+      const TRAIN = 'Train today'
+      return (
+        <Box key="rest" flexDirection={cols >= cells(REST) + 2 + buttonsWidth([TRAIN]) ? 'row' : 'column'}>
+          <Text dimColor wrap="truncate-end">
+            {REST}
+            {'  '}
+          </Text>
+          <Button key="train" label={TRAIN} onPress={() => void endRest($)} />
         </Box>
       )
     }
@@ -333,17 +513,28 @@ export const register: Register = (on, options) => {
     const days = await read($, history)
     const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
+    const debtText = owed > 0 ? `  debt ${owed} left · ${(await read($, isUnlocked)) ? 'prompts open' : 'pay to unlock'}` : ''
+    const progress = `${line(t)}${debtText}`
+    const run = streak(days)
+    const streakText = run > 0 ? `  🔥${run}d` : ''
+    const LOG_LABEL = 'log reps: '
+    const logWidth = cells(LOG_LABEL) + buttonsWidth(['+5', '+10', '+25']) + cells(streakText)
 
     return (
-      <Box>
-        <Text color={color} dimColor={color === undefined}>{withStreak(t, days)} </Text>
-        {owed > 0 && <Text bold>owe {owed} </Text>}
-        <Text dimColor>log </Text>
-        <Button key="add5" label="+5" onPress={add(5)} />
-        <Text> </Text>
-        <Button key="add10" label="+10" onPress={add(10)} />
-        <Text> </Text>
-        <Button key="add25" label="+25" onPress={add(25)} />
+      <Box key="tracker" flexDirection={cols >= cells(progress) + 2 + logWidth ? 'row' : 'column'}>
+        <Text color={color} dimColor={color === undefined} wrap="truncate-end">
+          {progress}
+          {'  '}
+        </Text>
+        <Box>
+          <Text dimColor>{LOG_LABEL}</Text>
+          <Button key="add5" label="+5" onPress={add(5)} />
+          <Text> </Text>
+          <Button key="add10" label="+10" onPress={add(10)} />
+          <Text> </Text>
+          <Button key="add25" label="+25" onPress={add(25)} />
+          {streakText !== '' && <Text>{streakText}</Text>}
+        </Box>
       </Box>
     )
   })
@@ -355,15 +546,35 @@ export const register: Register = (on, options) => {
     const heat = heatCells(days)
     const week = days.slice(-7)
 
+    const { Box, Text } = $.ui.resolve(e)
+    // The bar needs a monospace grid of BARBELL.width cells: the terminal's.
+    // Elsewhere, or too narrow, the name alone.
+    const barbell =
+      e.surface === 'terminal' && e.props.bodyColumns >= BARBELL.width ? (
+        <Box flexDirection="column">
+          <Text color="#d7af5f">{BARBELL.plates}</Text>
+          <Box>
+            <Text color="#d7af5f">{BARBELL.left}</Text>
+            <Text bold>{BARBELL.name}</Text>
+            <Text color="#d7af5f">{BARBELL.right}</Text>
+          </Box>
+          <Text color="#d7af5f">{BARBELL.plates}</Text>
+          <Text> </Text>
+        </Box>
+      ) : (
+        <Text bold>{BARBELL.name}</Text>
+      )
+
     const summary = week.map(day => {
       const mark = day.isSkipped ? '–' : day.goal > 0 && day.count >= day.goal ? '✓' : '·'
       return `${mark} ${day.date.slice(5)}  ${day.count}/${day.goal}`
     })
 
     if (e.surface === 'terminal') {
-      const { Box, Button, Text, Raster } = $.ui.resolve(e)
+      const { Button, Raster } = $.ui.resolve(e)
       return (
         <Box flexDirection="column">
+          {barbell}
           <Text bold>🔥 {run}-day streak</Text>
           {t !== null && <Text dimColor>{line(t)}</Text>}
           <Text> </Text>
@@ -377,9 +588,10 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Button } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
+        {barbell}
         <Text bold>🔥 {run}-day streak</Text>
         {t !== null && <Text dimColor>{line(t)}</Text>}
         {summary.map(row => <Text dimColor>{row}</Text>)}
@@ -428,7 +640,7 @@ export const register: Register = (on, options) => {
         {step < 2 ? (
           <Button key="next" label="Next" variant="primary" onPress={go(step + 1)} />
         ) : (
-          <Button key="finish" label="Start lifting" variant="primary" onPress={() => void finishOnboarding($)} />
+          <Button key="finish" label="Let's go" variant="primary" onPress={() => void finishOnboarding($)} />
         )}
       </Box>
     )
@@ -436,7 +648,7 @@ export const register: Register = (on, options) => {
     if (step === 0) {
       return (
         <Box flexDirection="column">
-          {header('Claude lifts the code. You lift the weight.')}
+          {header('Your agent works the code. You work the reps.')}
           <Text>Every day has a rep goal.</Text>
           <Text>When Claude runs a long turn, that's your cue for a set.</Text>
           <Text> </Text>
@@ -493,7 +705,7 @@ export const register: Register = (on, options) => {
     const routine = pickedRoutine(p)
     const exercise = routine?.mon?.exercise ?? (await read($, today))?.exercise ?? 'pushups'
     const sample = withStreak(
-      { date: '', exercise, goal: 100, unit: '', count: 60 },
+      { date: '', exercise, goal: 100, unit: '', count: 60, isRest: false },
       // three finished days, today still in progress: 🔥3d
       [
         ...Array.from({ length: 3 }, (_, i) => ({ date: `d${i}`, count: 100, goal: 100, isSkipped: false })),

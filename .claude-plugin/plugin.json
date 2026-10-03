@@ -1,7 +1,22 @@
 {
   "name": "terminal-gym",
+  "displayName": "Terminal Gym",
   "version": "0.1.0",
-  "description": "Claude Gym: a daily rep goal inside Claude Code. log with /fit, quick-log band, long-turn nudges, week heatmap, optional strict mode.",
+  "description": "A daily bodyweight rep goal inside Claude Code: log with /fit, quick-log band, long-turn nudges, streaks and a score grid, optional strict mode.",
+  "author": {
+    "name": "Naitik Mehta",
+    "url": "https://github.com/heyNaitik"
+  },
+  "homepage": "https://github.com/DrumAndCode/terminal-gym",
+  "repository": "https://github.com/DrumAndCode/terminal-gym",
+  "license": "MIT",
+  "keywords": [
+    "fitness",
+    "habit",
+    "streak",
+    "mod",
+    "productivity"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "nudges": {
@@ -13,14 +28,14 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Long turns add rep debt; new prompts are held until it is paid (/fit skip breaks your streak instead).",
+      "description": "Long turns add rep debt; new prompts are held until it is paid (/fit rest breaks your streak instead).",
       "default": false
     },
     "nudgeSeconds": {
       "type": "number",
       "title": "Nudge after (seconds)",
-      "description": "How long a turn runs before Claude Gym suggests a set.",
-      "default": 45
+      "description": "How long a turn runs before Terminal Gym suggests a set.",
+      "default": 30
     },
     "nudgeReps": {
       "type": "number",
@@ -40,8 +55,5 @@
       "description": "Show progress and +5/+10/+25 buttons above the prompt.",
       "default": true
     }
-  },
-  "author": {
-    "name": "Naitik Mehta"
   }
 }

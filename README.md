@@ -1,14 +1,32 @@
-# Claude Gym
+# ❚█═TERMINAL-GYM═█❚
 
-A Claude Code mod for a daily rep goal. Claude lifts the code, you lift the weight: when a turn runs long, that's your cue for a set.
+**Your agent put in the reps. You next.**
+
+A Claude Code mod for a daily bodyweight rep goal. When Claude runs a long turn, that's your cue for a set.
 
 ## What it does
 
-- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  🔥3d` with `[ +5 ] [ +10 ] [ +25 ]` buttons.
-- **Long-turn nudges**: after 45s of Claude working, a toast and the spinner suggest a set.
-- **Strict mode** (opt-in): long turns add rep debt; your next prompt waits until it's paid.
-- **Scoreboard**: streak plus a 28-day grid.
+- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`, grey at 0 then red, yellow and green as you close in on the goal.
+- **Breaks**: 2 minutes after a set, a toast says the break's over and asks for the next one.
+- **Long-turn nudges**: after 30s of Claude working, a toast and the spinner suggest a set.
+- **Strict mode** (opt-in): long turns add rep debt; your next prompt waits until you pay. Logging any reps unlocks your next prompt, plus every prompt for 2 minutes after; whatever's left comes due when the 2 minutes are up.
+- **Scoreboard** (`/fit score`): a barbell, your streak and a 28-day grid.
 - **Walkthrough**: three steps on first run to pick a program.
+
+## Install
+
+Requires Claude Code 2.1.288 or newer.
+
+```sh
+claude plugin marketplace add DrumAndCode/terminal-gym
+claude plugin install terminal-gym@terminal-gym
+```
+
+Or from inside a session: `/plugin install terminal-gym --marketplace DrumAndCode/terminal-gym`.
+
+Start a new session and the welcome band shows above your prompt. Update later with `claude plugin update terminal-gym@terminal-gym`.
+
+To hack on it, clone the repo and load it for one session with `claude --plugin-dir ./terminal-gym`.
 
 ## Commands
 
@@ -18,24 +36,29 @@ A Claude Code mod for a daily rep goal. Claude lifts the code, you lift the weig
 | `/fit 20` | log 20 reps |
 | `/fit set 80` | fix today's count |
 | `/fit reset` | today back to 0 |
+| `/fit swap [exercise]` | switch today's exercise (next in your program, or the one named) |
 | `/fit rest` | rest day (breaks streak, clears debt) |
+| `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
 | `/fit score` | streak + grid |
 | `/fit program` | pick your program |
-| `/fit coach strict` / `/fit coach easy` | strict mode on / off |
+| `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit rules` | house rules |
 | `/fit tour` | replay the welcome |
 | `/fit hide` | close panels |
 
 Settings live in `/config` under terminal-gym: nudges, strict mode, nudge delay, reps per nudge, spinner takeover, band.
 
-## Data
+## Privacy
 
-Local only, in `~/.claude/fitness`:
+The mod makes no network calls and adds no hidden context for the model. `/fit` replies appear in your conversation like any slash command's output, so Claude can see them. Everything else stays in `~/.claude/fitness`:
 
 - `routine.json`: the plan per weekday (`{ "mon": { "exercise": "pushups", "goal": 100 } }`, optional `"unit": "s"`).
-- `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day.
+- `log/YYYY-MM-DD`: that day's count. `log/YYYY-MM-DD.skip` marks a rest day; if it contains `off`, the rest day was undone (`/fit rest off`). The standalone `fit` shell script doesn't know about undone rest days.
+- `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap` (JSON plan, same shape as a routine day).
 
-## Develop
+## Contributing
+
+Issues and PRs welcome. Keep changes small and include a test.
 
 ```sh
 claude --plugin-dir .          # load it for one session
@@ -43,4 +66,10 @@ claude plugin validate .
 claude plugin test .
 ```
 
+`claude plugin test` runs `tests/*.test.tsx` against the engine itself. Once the mod has loaded, `tsc -p .` type-checks it against the engine's types in `.claude-plugin/types/`.
+
 Mods are early access; the API can change between Claude Code releases.
+
+## License
+
+MIT

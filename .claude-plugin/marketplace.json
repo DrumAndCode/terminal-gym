@@ -1,0 +1,15 @@
+{
+  "name": "terminal-gym",
+  "description": "Terminal Gym: a daily bodyweight rep goal mod for Claude Code.",
+  "owner": {
+    "name": "Naitik Mehta",
+    "url": "https://github.com/heyNaitik"
+  },
+  "plugins": [
+    {
+      "name": "terminal-gym",
+      "source": "./",
+      "description": "A daily bodyweight rep goal inside Claude Code. Your agent put in the reps. You next."
+    }
+  ]
+}
