@@ -406,21 +406,26 @@ export const register: Register = (on, options) => {
     const isRestDay = days.find(day => day.date === t.date)?.isSkipped === true
     const color = isRestDay ? undefined : progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
-    const progress = `${withStreak(t, days)}${owed > 0 ? `  owe ${owed}` : ''}`
-    const logWidth = cells('log ') + buttonsWidth(['+5', '+10', '+25'])
+    const progress = `${line(t)}${owed > 0 ? `  owe ${owed}` : ''}`
+    const run = streak(days)
+    const streakText = run > 0 ? `  🔥${run}d` : ''
+    const LOG_LABEL = 'log reps: '
+    const logWidth = cells(LOG_LABEL) + buttonsWidth(['+5', '+10', '+25']) + cells(streakText)
 
     return (
-      <Box key="tracker" flexDirection={cols >= cells(progress) + 1 + logWidth ? 'row' : 'column'}>
+      <Box key="tracker" flexDirection={cols >= cells(progress) + 2 + logWidth ? 'row' : 'column'}>
         <Text color={color} dimColor={color === undefined} wrap="truncate-end">
-          {progress}{' '}
+          {progress}
+          {'  '}
         </Text>
         <Box>
-          <Text dimColor>log </Text>
+          <Text dimColor>{LOG_LABEL}</Text>
           <Button key="add5" label="+5" onPress={add(5)} />
           <Text> </Text>
           <Button key="add10" label="+10" onPress={add(10)} />
           <Text> </Text>
           <Button key="add25" label="+25" onPress={add(25)} />
+          {streakText !== '' && <Text>{streakText}</Text>}
         </Box>
       </Box>
     )

@@ -328,7 +328,9 @@ describe('walkthrough', () => {
 
     expect(JSON.parse(files.get(`${HOME}/.claude/fitness/routine.json`) ?? '{}').mon).toEqual({ exercise: 'squats', goal: 400 })
     expect(open.has('gym-onboard')).toBe(false)
-    expect(await band.find({ type: 'Text', text: /0\/400 squats  🔥2d/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /0\/400 squats/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: '🔥2d' })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: 'log reps: ' })).toBeDefined()
     await band.unmount()
   })
 
