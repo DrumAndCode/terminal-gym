@@ -110,6 +110,8 @@ describe('lib', () => {
     expect(streak([day(0), day(100), day(120), day(40)])).toBe(3)
     expect(streak([day(0), day(100), day(40), day(0)])).toBe(2)
     expect(streak([day(100), day(100, true), day(100)])).toBe(1)
+    // A rest day taken today ends the run now, not tomorrow.
+    expect(streak([day(100), day(40), day(0, true)])).toBe(0)
   })
 })
 
@@ -678,6 +680,15 @@ describe('pace', () => {
     // Off: back to 8h from the 9:00 start, where 20 done covers 10:23.
     expect((await fit($, 'window off')).text).toContain('Back to 8h')
     expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('a late window ends at midnight, and a day with no goal gets none', async ($, on) => {
+    world(on, new Map(), { now: new Date(2026, 9, 5, 23, 0).getTime() })
+    await start($)
+    expect((await fit($, 'window 3')).text).toContain('100 pushups left, spread between now and midnight')
+    await fit($, 'goal 1')
+    await fit($, '1')
+    expect((await fit($, 'window 3')).text).toContain("Today's goal is done")
   })
 
   test('a window is only for today', { options: { strict: true } }, async ($, on) => {

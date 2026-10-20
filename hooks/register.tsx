@@ -130,7 +130,7 @@ const readDay = async ($: Engine, routine: Routine, logDir: string, ms: number):
   }
 }
 
-// Finished days in a row just before the window, so a streak can outlast it.
+// Days with reps in a row just before the window, so a streak can outlast it.
 // Cached per window: a full walk once, then one day's step as the window slides.
 const olderRun = async ($: Engine, days: readonly Day[], routine: Routine, logDir: string) => {
   const first = days[0]
@@ -470,6 +470,8 @@ export const register: Register = (on, options) => {
         if (before.isRest) return { text: "Today's a rest day. /fit rest off to train." }
         const plan = { exercise: before.exercise, goal: cmd.n, ...(before.unit === '' ? {} : { unit: before.unit }) }
         await $.fs.write(`${(await files($)).log}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
+        // A breather was sized for the old goal.
+        await $.store.delete('breather')
         await refreshHistory($)
         const after = await refreshToday($)
         return { text: `Today's goal is ${cmd.n}${after.unit} ${after.exercise}. ${line(after)}${paceText(await refreshPace($), isStrict)}` }
@@ -485,12 +487,17 @@ export const register: Register = (on, options) => {
           }
         }
         if (t.isRest) return { text: "Today's a rest day. /fit rest off to train." }
-        if (t.goal > 0 && t.count >= t.goal) return { text: `Today's goal is done. ${line(t)}` }
+        if (t.goal <= 0) return { text: 'No goal today. /fit goal 60 to set one.' }
+        if (t.count >= t.goal) return { text: `Today's goal is done. ${line(t)}` }
         const now = await $.clock.now()
-        const ms = cmd.hours * HOUR_MS
+        // Today ends at midnight: a window can't run into tomorrow's log.
+        const d = new Date(now)
+        const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
+        const ms = Math.min(cmd.hours * HOUR_MS, midnight - now)
         await $.store.set('window', { date: t.date, from: now, ms, base: t.count })
+        const span = ms < cmd.hours * HOUR_MS ? 'between now and midnight' : `over the next ${cmd.hours}h (done by ${clockTime(now + ms)})`
         return {
-          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread over the next ${cmd.hours}h (done by ${clockTime(now + ms)}). ${line(t)}${paceText(await refreshPace($), isStrict)}`,
+          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread ${span}. ${line(t)}${paceText(await refreshPace($), isStrict)}`,
         }
       }
       case 'program':
