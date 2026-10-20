@@ -211,6 +211,11 @@ export const setSizeFor = (goal: number, setting: number) => {
 
 // The goal as evenly spaced sets: the first due at the start, the last at the
 // end of the window. `required` is what should be done by `now`.
+const setGap = (goal: number, setSize: number, windowMs: number) => {
+  const sets = Math.ceil(goal / setSize)
+  return sets > 1 ? windowMs / (sets - 1) : windowMs
+}
+
 export const paceAt = (
   goal: number,
   count: number,
@@ -219,9 +224,9 @@ export const paceAt = (
   now: number,
   windowMs: number,
 ): Pace => {
-  if (goal <= 0 || setSize <= 0) return { required: 0, behind: 0, setSize, nextDueAt: null }
+  if (goal <= 0 || setSize <= 0) return { required: 0, behind: 0, setSize, nextDueAt: null, restUntil: null }
   const sets = Math.ceil(goal / setSize)
-  const gap = sets > 1 ? windowMs / (sets - 1) : windowMs
+  const gap = setGap(goal, setSize, windowMs)
   const due = Math.min(sets, 1 + Math.floor(Math.max(0, now - startedAt) / gap))
   const required = Math.min(goal, due * setSize)
   return {
@@ -229,8 +234,14 @@ export const paceAt = (
     behind: Math.max(0, required - count),
     setSize,
     nextDueAt: due < sets ? startedAt + due * gap : null,
+    restUntil: null,
   }
 }
+
+// Behind by more than a set, a full set logged earns a breather of half the gap
+// between sets before the rest is due: catching up never means back-to-back sets.
+export const breatherMs = (goal: number, setSize: number, windowMs: number) =>
+  goal <= 0 || setSize <= 0 ? 0 : setGap(goal, setSize, windowMs) / 2
 
 export const clockTime = (ms: number) => {
   const d = new Date(ms)
@@ -271,6 +282,7 @@ Off by default. When it's on:
 - prompts before 5am count as the night before
 - the first set is due right away
 - fall behind and your prompts wait until you catch up
+- more than a set behind? one set earns a breather before the rest
 - a toast tells you when each set comes due
 - \`/fit rest\` bails, but costs your streak
 

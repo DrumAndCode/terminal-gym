@@ -27,6 +27,8 @@ export type Pace = {
   behind: number
   setSize: number
   nextDueAt: number | null
+  // While a breather runs, catch-up reps are owed but prompts are not held.
+  restUntil: number | null
 }
 
 declare module 'claude-code' {

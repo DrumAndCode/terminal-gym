@@ -10,6 +10,7 @@ import {
   ROUTINES,
   SIZES,
   bar,
+  breatherMs,
   clockTime,
   paceAt,
   setSizeFor,
@@ -196,7 +197,13 @@ const startDay = async ($: Engine) => {
   if ((await dayStart($, date)) === undefined) await $.store.set('dayStart', { date, at: now })
 }
 
-// Recomputes the pace and arms a timer for the next set coming due.
+// A breather still running today, or undefined.
+const breatherEnd = async ($: Engine, date: string, now: number) => {
+  const stored = (await $.store.get('breather')) as { date?: string; until?: number } | undefined
+  return stored?.date === date && typeof stored.until === 'number' && stored.until > now ? stored.until : undefined
+}
+
+// Recomputes the pace and arms a timer for the next set or breather's end.
 const refreshPace = async ($: Engine): Promise<Pace | null> => {
   dueTimer?.cancel()
   dueTimer = undefined
@@ -207,10 +214,14 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
   const next: Pace | null =
     t === null || t.isRest || at === undefined
       ? null
-      : paceAt(t.goal, t.count, setSizeFor(t.goal, paceConfig.setSize), at, now, paceConfig.windowMs)
+      : {
+          ...paceAt(t.goal, t.count, setSizeFor(t.goal, paceConfig.setSize), at, now, paceConfig.windowMs),
+          restUntil: (await breatherEnd($, t.date, now)) ?? null,
+        }
   await update($, pace, () => next)
-  if (next?.nextDueAt != null && t !== null && t.count < t.goal) {
-    dueTimer = $.clock.after(Math.max(1, next.nextDueAt - now), () => void setDue($))
+  const wakeAt = Math.min(next?.nextDueAt ?? Infinity, next?.restUntil ?? Infinity)
+  if (wakeAt !== Infinity && t !== null && t.count < t.goal) {
+    dueTimer = $.clock.after(Math.max(1, wakeAt - now), () => void setDue($))
   }
   return next
 }
@@ -218,7 +229,7 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
 const setDue = async ($: Engine) => {
   const p = await refreshPace($)
   const t = await read($, today)
-  if (p === null || t === null || p.behind <= 0) return
+  if (p === null || t === null || p.behind <= 0 || p.restUntil !== null) return
   toast($, `⏱ Set due: ${p.behind} ${t.exercise}. ${p.required}/${t.goal} by now.`)
 }
 
@@ -233,6 +244,7 @@ const closePane = async ($: Engine, id: string) => {
 
 const paceText = (p: Pace | null, isStrict: boolean) => {
   if (p === null) return ''
+  if (p.behind > 0 && p.restUntil !== null) return `  behind ${p.behind} · breather to ${clockTime(p.restUntil)}`
   if (p.behind > 0) return `  behind ${p.behind}${isStrict ? ' · prompts wait' : ''}`
   return p.nextDueAt === null ? '' : `  next set ${clockTime(p.nextDueAt)}`
 }
@@ -248,6 +260,7 @@ const withStreak = (t: Today, days: readonly Day[], older = 0) => {
 }
 
 const logReps = async ($: Engine, change: (count: number) => number) => {
+  const owed = await refreshPace($)
   const before = await refreshToday($)
   const count = Math.max(0, change(before.count))
   await $.fs.write(`${(await files($)).log}/${before.date}`, `${count}\n`)
@@ -258,6 +271,16 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
     days.map(day => (day.date === after.date ? { ...day, count } : day)),
   )
 
+  // A full set that still leaves reps owed earns a breather before the rest.
+  // Clearing the debt or lowering the count ends one, so later sets aren't hidden.
+  const added = count - before.count
+  const stillOwed = owed === null ? 0 : owed.behind - added
+  if (owed !== null && stillOwed > 0 && added >= owed.setSize) {
+    const until = (await $.clock.now()) + breatherMs(after.goal, owed.setSize, paceConfig.windowMs)
+    await $.store.set('breather', { date: after.date, until })
+  } else if (stillOwed <= 0 || added < 0) {
+    await $.store.delete('breather')
+  }
   await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
@@ -471,7 +494,7 @@ export const register: Register = (on, options) => {
     await startDay($)
     const p = await refreshPace($)
     const t = await read($, today)
-    if (isStrict && p !== null && p.behind > 0) {
+    if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
       void $.prompt.fill({ text: e.text })
       return {
         drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
