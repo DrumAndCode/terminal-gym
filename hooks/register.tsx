@@ -18,7 +18,7 @@ import {
   cells,
   dayKey,
   fullStreak,
-  isDone,
+  keepsStreak,
   describeRoutine,
   heatCells,
   lastDays,
@@ -63,42 +63,7 @@ const onboardPick = atom({ plugin: 'terminal-gym', key: 'onboardPick' } as const
 // Same files as the `fit` shell script, so both agree.
 const files = async ($: Engine) => {
   const dir = `${(await $.env.get('HOME')) ?? ''}/.claude/fitness`
-  return { routine: `${dir}/routine.json`, log: `${dir}/log`, held: `${dir}/held-prompt.md` }
-}
-
-// A prompt strict mode held back. Every one is added to a file on disk too, so
-// a refill that misses the box (a dialog up, a draft typed over it) loses nothing.
-const holdPrompt = async ($: Engine, text: string) => {
-  void $.prompt.fill({ text })
-  try {
-    const { held } = await files($)
-    const before = (await $.fs.exists(held)) ? await $.fs.read(held) : ''
-    await $.fs.write(held, `${before}--- held ${new Date(await $.clock.now()).toISOString()}\n${text}\n\n`)
-    await $.store.set('heldPrompt', text)
-  } catch {
-    // Saving is a backup: the box already has the text.
-  }
-}
-
-// A held prompt that went through after all needs no handing back.
-const forgetPrompt = async ($: Engine, text: string) => {
-  if ((await $.store.get('heldPrompt')) === text) await $.store.delete('heldPrompt')
-}
-
-// Hands a held prompt back once prompts go through again (caught up, or a
-// breather earned), but never over a draft: one there is the person's own.
-const releasePrompt = async ($: Engine, p: Pace | null) => {
-  const text = (await $.store.get('heldPrompt')) as string | undefined
-  if (typeof text !== 'string' || (p !== null && p.behind > 0 && p.restUntil === null)) return
-  await $.store.delete('heldPrompt')
-  const draft = (await $.prompt.read()).text
-  const filled = draft.trim() === '' ? await $.prompt.fill({ text }) : undefined
-  toast(
-    $,
-    filled?.isFilled === true
-      ? 'Prompts go through again. Your held prompt is back in the box.'
-      : `Prompts go through again. Your held prompt is saved in ${(await files($)).held}.`,
-  )
+  return { routine: `${dir}/routine.json`, log: `${dir}/log` }
 }
 
 const loadRoutine = async ($: Engine, routinePath: string): Promise<Routine> => {
@@ -165,31 +130,31 @@ const readDay = async ($: Engine, routine: Routine, logDir: string, ms: number):
   }
 }
 
-// Finished days in a row just before the window, so a streak can outlast it.
+// Days with reps in a row just before the window, so a streak can outlast it.
 // Cached per window: a full walk once, then one day's step as the window slides.
 const olderRun = async ($: Engine, days: readonly Day[], routine: Routine, logDir: string) => {
   const first = days[0]
-  if (first === undefined || !isDone(first)) {
-    await $.store.delete('streakCache')
+  if (first === undefined || !keepsStreak(first)) {
+    await $.store.delete('streakRun')
     return 0
   }
   const oldest = lastDays(await $.clock.now(), HISTORY_DAYS)[0] ?? 0
   const asOf = dayKey(oldest)
-  const cache = (await $.store.get('streakCache')) as { asOf?: string; older?: number } | undefined
+  const cache = (await $.store.get('streakRun')) as { asOf?: string; older?: number } | undefined
   let older: number
   if (cache?.asOf === asOf && typeof cache.older === 'number') {
     older = cache.older
   } else if (cache?.asOf === dayKey(oldest - DAY_MS) && typeof cache.older === 'number') {
     // The window moved on a day: the day that left it joins the older run.
-    older = isDone(await readDay($, routine, logDir, oldest - DAY_MS)) ? cache.older + 1 : 0
+    older = keepsStreak(await readDay($, routine, logDir, oldest - DAY_MS)) ? cache.older + 1 : 0
   } else {
     older = 0
     for (let back = 1; back <= 366; back++) {
-      if (!isDone(await readDay($, routine, logDir, oldest - back * DAY_MS))) break
+      if (!keepsStreak(await readDay($, routine, logDir, oldest - back * DAY_MS))) break
       older++
     }
   }
-  await $.store.set('streakCache', { asOf, older })
+  await $.store.set('streakRun', { asOf, older })
   return older
 }
 
@@ -238,21 +203,32 @@ const breatherEnd = async ($: Engine, date: string, now: number) => {
   return stored?.date === date && typeof stored.until === 'number' && stored.until > now ? stored.until : undefined
 }
 
+type Schedule = { from: number; ms: number; base: number }
+
+// The span today's sets are spread over: the configured window from the first
+// prompt, or after `/fit window`, the reps left then (above `base`) over the hours named.
+const schedule = async ($: Engine, date: string): Promise<Schedule | undefined> => {
+  const set = (await $.store.get('window')) as Partial<Schedule> & { date?: string } | undefined
+  if (set?.date === date && typeof set.from === 'number' && typeof set.ms === 'number' && typeof set.base === 'number') {
+    return { from: set.from, ms: set.ms, base: set.base }
+  }
+  const at = await dayStart($, date)
+  return at === undefined ? undefined : { from: at, ms: paceConfig.windowMs, base: 0 }
+}
+
 // Recomputes the pace and arms a timer for the next set or breather's end.
 const refreshPace = async ($: Engine): Promise<Pace | null> => {
   dueTimer?.cancel()
   dueTimer = undefined
   // Re-read today: the date may have rolled over, or the shell script logged reps.
   const t = await refreshToday($)
-  const at = t === null ? undefined : await dayStart($, t.date)
+  const s = t === null ? undefined : await schedule($, t.date)
   const now = await $.clock.now()
-  const next: Pace | null =
-    t === null || t.isRest || at === undefined
-      ? null
-      : {
-          ...paceAt(t.goal, t.count, setSizeFor(t.goal, paceConfig.setSize), at, now, paceConfig.windowMs),
-          restUntil: (await breatherEnd($, t.date, now)) ?? null,
-        }
+  let next: Pace | null = null
+  if (t !== null && !t.isRest && s !== undefined) {
+    const left = paceAt(Math.max(0, t.goal - s.base), t.count - s.base, setSizeFor(t.goal, paceConfig.setSize), s.from, now, s.ms)
+    next = { ...left, required: left.required + s.base, restUntil: (await breatherEnd($, t.date, now)) ?? null }
+  }
   await update($, pace, () => next)
   const wakeAt = Math.min(next?.nextDueAt ?? Infinity, next?.restUntil ?? Infinity)
   if (wakeAt !== Infinity && t !== null && t.count < t.goal) {
@@ -310,13 +286,14 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   // Clearing the debt or lowering the count ends one, so later sets aren't hidden.
   const added = count - before.count
   const stillOwed = owed === null ? 0 : owed.behind - added
-  if (owed !== null && stillOwed > 0 && added >= owed.setSize) {
-    const until = (await $.clock.now()) + breatherMs(after.goal, owed.setSize, paceConfig.windowMs)
+  const s = await schedule($, after.date)
+  if (owed !== null && s !== undefined && stillOwed > 0 && added >= owed.setSize) {
+    const until = (await $.clock.now()) + breatherMs(after.goal - s.base, owed.setSize, s.ms)
     await $.store.set('breather', { date: after.date, until })
   } else if (stillOwed <= 0 || added < 0) {
     await $.store.delete('breather')
   }
-  await releasePrompt($, await refreshPace($))
+  await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
@@ -411,7 +388,7 @@ const boot = async ($: Engine) => {
   await $.command.register({
     name: 'fit',
     description: "Log reps toward today's goal",
-    argumentHint: '[n | set n | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
+    argumentHint: '[n | set n | reset | goal n | window hours|off | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
     immediate: true,
   })
 }
@@ -454,7 +431,7 @@ export const register: Register = (on, options) => {
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
         await refreshToday($)
         await refreshHistory($)
-        await releasePrompt($, await refreshPace($))
+        await refreshPace($)
         return { text: `Rest day logged. Streak resets, no sets due today. Back at it tomorrow. (/fit rest off to undo)` }
       }
       case 'unskip':
@@ -486,6 +463,43 @@ export const register: Register = (on, options) => {
         const swapped = await refreshToday($)
         await refreshPace($)
         return { text: `Swapped to ${plan.exercise} today.${carried} ${line(swapped)}` }
+      }
+      case 'goal': {
+        // Today's plan with a new goal, in the same file `/fit swap` writes.
+        const before = await refreshToday($)
+        if (before.isRest) return { text: "Today's a rest day. /fit rest off to train." }
+        const plan = { exercise: before.exercise, goal: cmd.n, ...(before.unit === '' ? {} : { unit: before.unit }) }
+        await $.fs.write(`${(await files($)).log}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
+        // A breather was sized for the old goal.
+        await $.store.delete('breather')
+        await refreshHistory($)
+        const after = await refreshToday($)
+        return { text: `Today's goal is ${cmd.n}${after.unit} ${after.exercise}. ${line(after)}${paceText(await refreshPace($), isStrict)}` }
+      }
+      case 'window': {
+        const t = await refreshToday($)
+        // A breather was sized for the old window.
+        await $.store.delete('breather')
+        if (cmd.hours === null) {
+          await $.store.delete('window')
+          return {
+            text: `Back to ${paceConfig.windowMs / HOUR_MS}h from your first prompt. ${line(t)}${paceText(await refreshPace($), isStrict)}`,
+          }
+        }
+        if (t.isRest) return { text: "Today's a rest day. /fit rest off to train." }
+        if (t.goal <= 0) return { text: 'No goal today. /fit goal 60 to set one.' }
+        if (t.count >= t.goal) return { text: `Today's goal is done. ${line(t)}` }
+        const now = await $.clock.now()
+        // Today ends at midnight: a window can't run into tomorrow's log. It ends a
+        // minute early so its last set comes due today, not on the stroke of midnight.
+        const d = new Date(now)
+        const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
+        const ms = Math.max(1, Math.min(cmd.hours * HOUR_MS, midnight - now - 60_000))
+        await $.store.set('window', { date: t.date, from: now, ms, base: t.count })
+        const span = ms < cmd.hours * HOUR_MS ? 'between now and midnight' : `over the next ${cmd.hours}h (done by ${clockTime(now + ms)})`
+        return {
+          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread ${span}. ${line(t)}${paceText(await refreshPace($), isStrict)}`,
+        }
       }
       case 'program':
         await openOnboarding($)
@@ -530,12 +544,11 @@ export const register: Register = (on, options) => {
     const p = await refreshPace($)
     const t = await read($, today)
     if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
-      await holdPrompt($, e.text)
+      void $.prompt.fill({ text: e.text })
       return {
-        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log; your prompt comes back when prompts go through again. /fit rest skips the day (breaks streak).`,
+        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
       }
     }
-    await forgetPrompt($, e.text)
     return next(e)
   })
 
@@ -834,7 +847,7 @@ export const register: Register = (on, options) => {
     const exercise = routine?.mon?.exercise ?? (await read($, today))?.exercise ?? 'pushups'
     const sample = withStreak(
       { date: '', exercise, goal: 100, unit: '', count: 60, isRest: false },
-      // three finished days, today still in progress: 🔥3d
+      // three finished days and reps today: 🔥4d
       [
         ...Array.from({ length: 3 }, (_, i) => ({ date: `d${i}`, count: 100, goal: 100, exercise, isSkipped: false })),
         { date: 'today', count: 60, goal: 100, exercise, isSkipped: false },
@@ -853,10 +866,10 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {header('Keep the streak alive')}
-        <Text>Hit your goal and the streak grows.</Text>
+        <Text>Train any reps and the streak grows.</Text>
         <Text>It sits at the end of your tracker:</Text>
         <Text color="#d7af5f">  {sample}</Text>
-        <Text dimColor>Miss a day and it resets to zero.</Text>
+        <Text dimColor>A day with none, or a rest day, resets it to zero.</Text>
         <Text> </Text>
         <Text>See every day as a grid:</Text>
         <Text dimColor>  type /fit score</Text>

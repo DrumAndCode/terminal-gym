@@ -105,10 +105,13 @@ describe('lib', () => {
     expect(parseFit('coach strict').kind).toBe('error')
   })
 
-  test('streak counts finished days and forgives an unfinished today', async () => {
+  test('streak counts days with any reps and forgives an empty today', async () => {
     const day = (count: number, isSkipped = false) => ({ date: 'd', count, goal: 100, exercise: 'dips', isSkipped })
-    expect(streak([day(0), day(100), day(120), day(40)])).toBe(2)
+    expect(streak([day(0), day(100), day(120), day(40)])).toBe(3)
+    expect(streak([day(0), day(100), day(40), day(0)])).toBe(2)
     expect(streak([day(100), day(100, true), day(100)])).toBe(1)
+    // A rest day taken today ends the run now, not tomorrow.
+    expect(streak([day(100), day(40), day(0, true)])).toBe(0)
   })
 })
 
@@ -335,7 +338,7 @@ describe('walkthrough', () => {
     await ui.press({ key: 'size-Heavy' })
     expect(await ui.find({ type: 'Text', text: '400 squats' })).toBeDefined()
     await ui.press({ key: 'next' })
-    expect(await ui.find({ type: 'Text', text: /🔥3d/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /🔥4d/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /fit score/ })).toBeDefined()
     await ui.press({ key: 'finish' })
     await ui.unmount()
@@ -636,64 +639,66 @@ describe('pace', () => {
     expect((await send($)).drop).toBeUndefined()
   })
 
-  test('strict: a held prompt is saved and comes back once caught up', { options: { strict: true } }, async ($, on) => {
-    const { files, box, toasts } = world(on)
-    await start($)
-    expect((await send($, 'a long prompt')).drop).toContain('comes back')
-    expect(box.text).toBe('a long prompt')
-    expect(files.get(`${HOME}/.claude/fitness/held-prompt.md`)).toContain('a long prompt')
-    // The person types over it to log a partial set: still held.
-    box.text = ''
-    await fit($, '5')
-    expect(box.text).toBe('')
-    await fit($, '5')
-    expect(box.text).toBe('a long prompt')
-    expect(toasts.some(t => t.includes('back in the box'))).toBe(true)
-    // Handed back once only.
-    box.text = ''
-    await fit($, '1')
-    expect(box.text).toBe('')
-  })
-
-  test('strict: a held prompt never lands on a draft', { options: { strict: true } }, async ($, on) => {
-    const { box, toasts } = world(on)
-    await start($)
-    await send($, 'a long prompt')
-    box.text = 'a long prompt, edited'
-    await fit($, '10')
-    expect(box.text).toBe('a long prompt, edited')
-    expect(toasts.some(t => t.includes('saved in'))).toBe(true)
-  })
-
-  test('strict: a held prompt that went through is not handed back', { options: { strict: true } }, async ($, on) => {
-    const { box, files } = world(on)
-    await start($)
-    await send($, 'a long prompt')
-    // The shell script logs the set; the prompt still in the box is sent.
-    files.set(`${LOG}/2026-10-05`, '10\n')
-    expect((await send($, 'a long prompt')).drop).toBeUndefined()
-    box.text = ''
-    await fit($, '1')
-    expect(box.text).toBe('')
-  })
-
-  test('strict: every held prompt is kept on disk', { options: { strict: true } }, async ($, on) => {
-    const { files } = world(on)
-    await start($)
-    await send($, 'first')
-    await send($, 'second')
-    const held = files.get(`${HOME}/.claude/fitness/held-prompt.md`) ?? ''
-    expect(held).toContain('first')
-    expect(held).toContain('second')
-  })
-
-  test('strict: a rest day hands the held prompt back', { options: { strict: true } }, async ($, on) => {
+  test('strict: a held prompt goes back in the box', { options: { strict: true } }, async ($, on) => {
     const { box } = world(on)
     await start($)
-    await send($, 'a long prompt')
-    box.text = ''
-    await fit($, 'rest')
+    expect((await send($, 'a long prompt')).drop).toContain('Behind pace')
     expect(box.text).toBe('a long prompt')
+  })
+
+  test('/fit goal changes today only, and the pace follows', async ($, on) => {
+    const { files } = world(on)
+    await start($)
+    expect(parseFit('goal 60')).toEqual({ kind: 'goal', n: 60 })
+    expect(parseFit('goal').kind).toBe('error')
+    expect(parseFit('goal 0').kind).toBe('error')
+    const ran = await fit($, 'goal 60')
+    expect(ran.text).toContain("Today's goal is 60 pushups")
+    expect(JSON.parse(files.get(`${LOG}/2026-10-05.swap`) ?? '{}')).toEqual({ exercise: 'pushups', goal: 60 })
+    expect((await fit($, '')).text).toContain('0/60 pushups')
+    expect((await fit($, '60')).text).toContain('60/60 pushups')
+  })
+
+  test('strict: /fit window spreads what is left over the hours named', { options: { strict: true } }, async ($, on) => {
+    const { clock, toasts } = world(on)
+    expect(parseFit('window 3')).toEqual({ kind: 'window', hours: 3 })
+    expect(parseFit('window 1.5h')).toEqual({ kind: 'window', hours: 1.5 })
+    expect(parseFit('window off')).toEqual({ kind: 'window', hours: null })
+    expect(parseFit('window').kind).toBe('error')
+    expect(parseFit('window 30').kind).toBe('error')
+    await start($)
+    await send($)
+    await fit($, '10')
+    await clock.advance(HOUR)
+    // 90 left in sets of 10 over 3h: the first due now, then every 22.5 minutes.
+    const ran = await fit($, 'window 3')
+    expect(ran.text).toContain('90 pushups left, spread over the next 3h (done by 13:00)')
+    expect((await send($)).drop).toContain('(20/100 due by now)')
+    expect((await fit($, '10')).text).toContain('next set 10:22')
+    await clock.advance(23 * 60_000)
+    expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 30/100 by now.'))).toBe(true)
+    // Off: back to 8h from the 9:00 start, where 20 done covers 10:23.
+    expect((await fit($, 'window off')).text).toContain('Back to 8h')
+    expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('a late window ends at midnight, and a day with no goal gets none', async ($, on) => {
+    const { clock } = world(on, new Map(), { now: new Date(2026, 9, 5, 23, 0).getTime() })
+    await start($)
+    expect((await fit($, 'window 3')).text).toContain('100 pushups left, spread between now and midnight')
+    // The last of the ten sets comes due before midnight, not on it.
+    await fit($, '90')
+    await clock.set(new Date(2026, 9, 5, 23, 59).getTime())
+    expect((await fit($, '')).text).toContain('behind 10')
+    await fit($, 'goal 1')
+    await fit($, '1')
+    expect((await fit($, 'window 3')).text).toContain("Today's goal is done")
+  })
+
+  test('a window is only for today', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map(), { store: { window: { date: '2026-10-04', from: MONDAY_9AM - 20 * HOUR, ms: HOUR, base: 0 } } })
+    await start($)
+    expect((await send($)).drop).toContain('10/100 due by now')
   })
 
   test('strict: the next set comes due on schedule, with a toast', { options: { strict: true } }, async ($, on) => {
@@ -852,6 +857,12 @@ describe('streaks and today', () => {
     expect((await fit($, '')).text).toContain('🔥40d')
     await fit($, '10')
     expect((await fit($, '')).text).toContain('🔥41d')
+  })
+
+  test('a partial day keeps the streak', async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-04`, '60\n']]))
+    await start($)
+    expect((await fit($, '')).text).toContain('🔥1d')
   })
 
   test('a missed day ends the streak', async ($, on) => {

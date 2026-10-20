@@ -50,9 +50,12 @@ export type FitCommand =
   | { kind: 'strict'; isOn: boolean }
   | { kind: 'add'; n: number }
   | { kind: 'set'; n: number }
+  | { kind: 'goal'; n: number }
+  // null: back to the configured window from the first prompt.
+  | { kind: 'window'; hours: number | null }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|off | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -76,20 +79,37 @@ export const parseFit = (args: string): FitCommand => {
       ? { kind: 'set', n: Number(value) }
       : { kind: 'error', text: 'fit: set needs a number' }
   }
+  if (head === 'goal') {
+    return value !== undefined && /^\d+$/.test(value) && Number(value) > 0
+      ? { kind: 'goal', n: Number(value) }
+      : { kind: 'error', text: 'fit: goal needs a number of reps, like /fit goal 60' }
+  }
+  if (head === 'window') {
+    if (value === 'off') return { kind: 'window', hours: null }
+    // "3", "1.5" or "3h": hours from now, up to a day.
+    const hours = value !== undefined && /^\d+(\.\d+)?h?$/.test(value) ? parseFloat(value) : NaN
+    return hours > 0 && hours <= 24
+      ? { kind: 'window', hours }
+      : { kind: 'error', text: 'fit: window needs hours from now (up to 24), like /fit window 3, or off' }
+  }
   if (/^-?\d+$/.test(head)) return { kind: 'add', n: Number(head) }
   return { kind: 'error', text: USAGE }
 }
 
 export const isDone = (day: Day) => !day.isSkipped && day.goal > 0 && day.count >= day.goal
 
-// Today counts once done; an unfinished today does not break the run yet.
+// Any reps keep a streak alive; only a day with none, or a rest day, breaks it.
+export const keepsStreak = (day: Day) => !day.isSkipped && day.count > 0
+
+// Today counts once it has reps; an empty today does not break the run yet,
+// but a rest day taken today does.
 export const streak = (history: readonly Day[]) => {
   let run = 0
   for (let i = history.length - 1; i >= 0; i--) {
     const day = history[i]
     if (day === undefined) break
-    if (isDone(day)) run++
-    else if (i !== history.length - 1) break
+    if (keepsStreak(day)) run++
+    else if (i !== history.length - 1 || day.isSkipped) break
   }
   return run
 }
@@ -102,11 +122,11 @@ const PARTIAL = 0x6b5d3f
 const EMPTY = 0x343434
 const DEFAULT = 0x01000000
 
-// The streak, counting days older than the window when the window is all done.
+// The streak, counting days older than the window when every day in it has reps.
 export const fullStreak = (history: readonly Day[], older: number) => {
   const run = streak(history)
   const last = history[history.length - 1]
-  const coversWindow = run === history.length || (run === history.length - 1 && last !== undefined && !isDone(last))
+  const coversWindow = run === history.length || (run === history.length - 1 && last !== undefined && !keepsStreak(last) && !last.isSkipped)
   return coversWindow ? run + older : run
 }
 
@@ -266,6 +286,8 @@ or press **+5 / +10 / +25** above the prompt
 | \`/fit\` | today's progress |
 | \`/fit set 80\` | fix today's count |
 | \`/fit reset\` | today back to 0 |
+| \`/fit goal 60\` | change today's goal |
+| \`/fit window 3\` | finish today in the next 3h |
 | \`/fit swap\` | switch today's exercise |
 | \`/fit rest\` | rest day (breaks streak) |
 | \`/fit rest off\` | undo today's rest day |
@@ -279,6 +301,7 @@ or press **+5 / +10 / +25** above the prompt
 ### Strict mode
 Off by default. When it's on:
 - today's goal is split into sets, spread over 8 hours (by default) from your first prompt
+- \`/fit window 3\` spreads what's left over the next 3 hours instead (ending by midnight)
 - prompts before 5am count as the night before
 - the first set is due right away
 - fall behind and your prompts wait until you catch up

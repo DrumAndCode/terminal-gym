@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
 - **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
 - **Scoreboard** (`/fit score`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.
-- **Streaks**: count every day you hit your goal, for as long as you keep it going.
+- **Streaks**: count every day you log any reps, for as long as you keep it going. A day with none, or a rest day, resets it. The grid still marks the days you hit the full goal.
 
 ## How a strict day works
 
@@ -39,7 +39,9 @@ Strict mode spreads today's goal into evenly spaced sets over a training window 
 
 Fall more than a set behind and you don't have to pay it all back to back. Log one full set and you earn a breather of half the gap between sets (about 26 minutes with the defaults): prompts go through, the band reads `behind 10 · breather to 10:26`, and a toast calls the next set when it ends. Log less than a set and your prompts still wait.
 
-A held prompt goes back in the prompt box, and every held prompt is added to `~/.claude/fitness/held-prompt.md`. When prompts go through again (you caught up, earned a breather, or took a rest day), the mod puts the last held prompt back in an empty box. If you typed something else meanwhile, the mod leaves your draft alone and points you to the file.
+A held prompt goes back in the prompt box, so you can send it again once you've logged the set.
+
+Know you only have a few hours today? `/fit window 3` spreads the reps you still owe over the next 3 hours, starting now. A window ends by midnight, because the day's log does. The first of those sets is due straight away. `/fit window off` goes back to the default window. `/fit goal 60` changes today's goal and leaves your routine alone.
 
 Only prompts you type can be held. Background tasks, `/loop` runs, messages from other sessions and slash commands like `/fit 10` always go through. Prompts before 5am count as the night before, so a late night never leaves you a wall of overdue sets in the morning.
 
@@ -53,7 +55,9 @@ Easy mode (the default) shows the same schedule on the band and the same reminde
 | `/fit 20` | log 20 reps |
 | `/fit set 80` | fix today's count |
 | `/fit reset` | today back to 0 |
-| `/fit swap [exercise]` | switch today's exercise: the next in your program, or the one you name |
+| `/fit goal 60` | change today's goal (your routine stays as it is) |
+| `/fit window 3` | spread what's left of today over the next 3 hours (`/fit window off` to undo) |
+| `/fit swap [exercise]` | switch today's exercise: the next in your program, or the one you name, with that exercise's goal |
 | `/fit rest` | rest day: no sets due, breaks your streak |
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
 | `/fit score` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
@@ -85,18 +89,18 @@ The mod makes no network calls and adds no hidden context for the model. `/fit` 
 - `routine.json`: the plan per weekday, for example `{ "mon": { "exercise": "pushups", "goal": 100 } }`, with an optional `"unit": "s"` for timed exercises. Edit it for a custom program.
 - `log/YYYY-MM-DD`: that day's count.
 - `log/YYYY-MM-DD.skip`: a rest day. If it contains `off`, the rest day was undone.
-- `log/YYYY-MM-DD.swap`: that day's exercise after `/fit swap`, in the same shape as a routine day.
+- `log/YYYY-MM-DD.swap`: that day's plan after `/fit swap` or `/fit goal`, in the same shape as a routine day.
 
 ## What it does inside Claude Code
 
 A mod runs inside Claude Code, so here is everything Terminal Gym touches:
 
-- **Files it writes:** only its own data in `~/.claude/fitness`: the routine, the daily logs listed above, `held-prompt.md` (each prompt strict mode held), and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
-- **Its own store:** a few values in the mod's per-plugin store inside Claude Code: today's start time, the streak cache, a held prompt waiting to come back, and whether you've seen the welcome.
+- **Files it writes:** only its own data in `~/.claude/fitness`: the routine, the daily logs listed above, and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
+- **Its own store:** a few values in the mod's per-plugin store inside Claude Code: today's start time, any `/fit window` set for today, the streak cache, and whether you've seen the welcome.
 - **Settings it changes:** `/fit strict` and `/fit easy` turn its own *Strict mode* setting (`terminal-gym.strict`) on and off. That's the only setting it changes. It sets no environment variables; it reads `HOME` to find `~/.claude/fitness`.
 - **Permissions:** it never approves or denies a tool call, never changes your permission mode, and never runs a model or a process.
 - **Events it hooks:**
-  - `prompt.submit`: in strict mode, holds a prompt you typed while you're behind pace, saves it, and puts its text back in the prompt box. It hands the prompt back again once prompts go through. Easy mode lets everything through. Prompts from other sources are never touched.
+  - `prompt.submit`: in strict mode, holds a prompt you typed while you're behind pace and puts its text back in the prompt box. Easy mode lets everything through. Prompts from other sources are never touched.
   - `command.run`: answers its own `/fit` command, and nothing else.
   - `session.start` and the SessionStart event after `/clear` or `/resume`: load today's state and register `/fit`. The event passes through unchanged.
   - `turn.start` and `turn.complete`: time the easy-mode nudge and refresh the band.
