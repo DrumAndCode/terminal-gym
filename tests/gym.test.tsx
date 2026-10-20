@@ -683,9 +683,13 @@ describe('pace', () => {
   })
 
   test('a late window ends at midnight, and a day with no goal gets none', async ($, on) => {
-    world(on, new Map(), { now: new Date(2026, 9, 5, 23, 0).getTime() })
+    const { clock } = world(on, new Map(), { now: new Date(2026, 9, 5, 23, 0).getTime() })
     await start($)
     expect((await fit($, 'window 3')).text).toContain('100 pushups left, spread between now and midnight')
+    // The last of the ten sets comes due before midnight, not on it.
+    await fit($, '90')
+    await clock.set(new Date(2026, 9, 5, 23, 59).getTime())
+    expect((await fit($, '')).text).toContain('behind 10')
     await fit($, 'goal 1')
     await fit($, '1')
     expect((await fit($, 'window 3')).text).toContain("Today's goal is done")

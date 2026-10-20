@@ -301,7 +301,7 @@ or press **+5 / +10 / +25** above the prompt
 ### Strict mode
 Off by default. When it's on:
 - today's goal is split into sets, spread over 8 hours (by default) from your first prompt
-- \`/fit window 3\` spreads what's left over the next 3 hours instead
+- \`/fit window 3\` spreads what's left over the next 3 hours instead (ending by midnight)
 - prompts before 5am count as the night before
 - the first set is due right away
 - fall behind and your prompts wait until you catch up

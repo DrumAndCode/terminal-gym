@@ -490,10 +490,11 @@ export const register: Register = (on, options) => {
         if (t.goal <= 0) return { text: 'No goal today. /fit goal 60 to set one.' }
         if (t.count >= t.goal) return { text: `Today's goal is done. ${line(t)}` }
         const now = await $.clock.now()
-        // Today ends at midnight: a window can't run into tomorrow's log.
+        // Today ends at midnight: a window can't run into tomorrow's log. It ends a
+        // minute early so its last set comes due today, not on the stroke of midnight.
         const d = new Date(now)
         const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
-        const ms = Math.min(cmd.hours * HOUR_MS, midnight - now)
+        const ms = Math.max(1, Math.min(cmd.hours * HOUR_MS, midnight - now - 60_000))
         await $.store.set('window', { date: t.date, from: now, ms, base: t.count })
         const span = ms < cmd.hours * HOUR_MS ? 'between now and midnight' : `over the next ${cmd.hours}h (done by ${clockTime(now + ms)})`
         return {

@@ -41,7 +41,7 @@ Fall more than a set behind and you don't have to pay it all back to back. Log o
 
 A held prompt goes back in the prompt box, so you can send it again once you've logged the set.
 
-Know you only have a few hours today? `/fit window 3` spreads the reps you still owe over the next 3 hours, starting now. The first of those sets is due straight away. `/fit window off` goes back to the default window. `/fit goal 60` changes today's goal and leaves your routine alone.
+Know you only have a few hours today? `/fit window 3` spreads the reps you still owe over the next 3 hours, starting now. A window ends by midnight, because the day's log does. The first of those sets is due straight away. `/fit window off` goes back to the default window. `/fit goal 60` changes today's goal and leaves your routine alone.
 
 Only prompts you type can be held. Background tasks, `/loop` runs, messages from other sessions and slash commands like `/fit 10` always go through. Prompts before 5am count as the night before, so a late night never leaves you a wall of overdue sets in the morning.
 
