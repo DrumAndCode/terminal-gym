@@ -18,7 +18,7 @@ import {
   cells,
   dayKey,
   fullStreak,
-  isDone,
+  keepsStreak,
   describeRoutine,
   heatCells,
   lastDays,
@@ -134,27 +134,27 @@ const readDay = async ($: Engine, routine: Routine, logDir: string, ms: number):
 // Cached per window: a full walk once, then one day's step as the window slides.
 const olderRun = async ($: Engine, days: readonly Day[], routine: Routine, logDir: string) => {
   const first = days[0]
-  if (first === undefined || !isDone(first)) {
-    await $.store.delete('streakCache')
+  if (first === undefined || !keepsStreak(first)) {
+    await $.store.delete('streakRun')
     return 0
   }
   const oldest = lastDays(await $.clock.now(), HISTORY_DAYS)[0] ?? 0
   const asOf = dayKey(oldest)
-  const cache = (await $.store.get('streakCache')) as { asOf?: string; older?: number } | undefined
+  const cache = (await $.store.get('streakRun')) as { asOf?: string; older?: number } | undefined
   let older: number
   if (cache?.asOf === asOf && typeof cache.older === 'number') {
     older = cache.older
   } else if (cache?.asOf === dayKey(oldest - DAY_MS) && typeof cache.older === 'number') {
     // The window moved on a day: the day that left it joins the older run.
-    older = isDone(await readDay($, routine, logDir, oldest - DAY_MS)) ? cache.older + 1 : 0
+    older = keepsStreak(await readDay($, routine, logDir, oldest - DAY_MS)) ? cache.older + 1 : 0
   } else {
     older = 0
     for (let back = 1; back <= 366; back++) {
-      if (!isDone(await readDay($, routine, logDir, oldest - back * DAY_MS))) break
+      if (!keepsStreak(await readDay($, routine, logDir, oldest - back * DAY_MS))) break
       older++
     }
   }
-  await $.store.set('streakCache', { asOf, older })
+  await $.store.set('streakRun', { asOf, older })
   return older
 }
 
@@ -839,7 +839,7 @@ export const register: Register = (on, options) => {
     const exercise = routine?.mon?.exercise ?? (await read($, today))?.exercise ?? 'pushups'
     const sample = withStreak(
       { date: '', exercise, goal: 100, unit: '', count: 60, isRest: false },
-      // three finished days, today still in progress: 🔥3d
+      // three finished days and reps today: 🔥4d
       [
         ...Array.from({ length: 3 }, (_, i) => ({ date: `d${i}`, count: 100, goal: 100, exercise, isSkipped: false })),
         { date: 'today', count: 60, goal: 100, exercise, isSkipped: false },
@@ -858,10 +858,10 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {header('Keep the streak alive')}
-        <Text>Hit your goal and the streak grows.</Text>
+        <Text>Train any reps and the streak grows.</Text>
         <Text>It sits at the end of your tracker:</Text>
         <Text color="#d7af5f">  {sample}</Text>
-        <Text dimColor>Miss a day and it resets to zero.</Text>
+        <Text dimColor>A day with none, or a rest day, resets it to zero.</Text>
         <Text> </Text>
         <Text>See every day as a grid:</Text>
         <Text dimColor>  type /fit score</Text>

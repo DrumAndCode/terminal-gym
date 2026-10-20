@@ -98,13 +98,16 @@ export const parseFit = (args: string): FitCommand => {
 
 export const isDone = (day: Day) => !day.isSkipped && day.goal > 0 && day.count >= day.goal
 
-// Today counts once done; an unfinished today does not break the run yet.
+// Any reps keep a streak alive; only a day with none, or a rest day, breaks it.
+export const keepsStreak = (day: Day) => !day.isSkipped && day.count > 0
+
+// Today counts once it has reps; an empty today does not break the run yet.
 export const streak = (history: readonly Day[]) => {
   let run = 0
   for (let i = history.length - 1; i >= 0; i--) {
     const day = history[i]
     if (day === undefined) break
-    if (isDone(day)) run++
+    if (keepsStreak(day)) run++
     else if (i !== history.length - 1) break
   }
   return run
@@ -122,7 +125,7 @@ const DEFAULT = 0x01000000
 export const fullStreak = (history: readonly Day[], older: number) => {
   const run = streak(history)
   const last = history[history.length - 1]
-  const coversWindow = run === history.length || (run === history.length - 1 && last !== undefined && !isDone(last))
+  const coversWindow = run === history.length || (run === history.length - 1 && last !== undefined && !keepsStreak(last))
   return coversWindow ? run + older : run
 }
 

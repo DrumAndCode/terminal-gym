@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
 - **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
 - **Scoreboard** (`/fit score`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.
-- **Streaks**: count every day you hit your goal, for as long as you keep it going.
+- **Streaks**: count every day you log any reps, for as long as you keep it going. A day with none, or a rest day, resets it. The grid still marks the days you hit the full goal.
 
 ## How a strict day works
 
