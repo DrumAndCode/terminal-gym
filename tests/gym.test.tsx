@@ -614,10 +614,10 @@ describe('pace', () => {
     expect(setSizeFor(12, 0)).toBe(5)
     expect(setSizeFor(3, 0)).toBe(3)
     expect(setSizeFor(100, 15)).toBe(15)
-    expect(paceAt(100, 0, 10, 0, 0, 8 * HOUR)).toEqual({ required: 10, behind: 10, setSize: 10, nextDueAt: GAP })
+    expect(paceAt(100, 0, 10, 0, 0, 8 * HOUR)).toEqual({ required: 10, behind: 10, setSize: 10, nextDueAt: GAP, restUntil: null })
     expect(paceAt(100, 10, 10, 0, GAP - 1, 8 * HOUR).behind).toBe(0)
     expect(paceAt(100, 10, 10, 0, GAP, 8 * HOUR).behind).toBe(10)
-    expect(paceAt(100, 40, 10, 0, 8 * HOUR, 8 * HOUR)).toEqual({ required: 100, behind: 60, setSize: 10, nextDueAt: null })
+    expect(paceAt(100, 40, 10, 0, 8 * HOUR, 8 * HOUR)).toEqual({ required: 100, behind: 60, setSize: 10, nextDueAt: null, restUntil: null })
     expect(paceAt(0, 0, 0, 0, 0, 8 * HOUR).behind).toBe(0)
   })
 
@@ -693,6 +693,41 @@ describe('pace', () => {
     await start($)
     await clock.advance(GAP - 60_000 + 1_000)
     expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups'))).toBe(true)
+  })
+
+  test('strict: a set logged while two behind earns a breather, then the rest is due', { options: { strict: true } }, async ($, on) => {
+    const { clock, toasts } = world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
+    await start($)
+    expect((await send($)).drop).toContain('Behind pace: 20 pushups')
+    expect((await fit($, '10')).text).toContain('behind 10 · breather to 09:26')
+    expect((await send($)).drop).toBeUndefined()
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /breather to 09:26/ })).toBeDefined()
+    await ui.unmount()
+    await clock.advance(GAP / 2 - 1_000)
+    expect((await send($)).drop).toBeUndefined()
+    expect(toasts.some(t => t.includes('Set due'))).toBe(false)
+    await clock.advance(2_000)
+    expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 20/100 by now.'))).toBe(true)
+    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
+    await fit($, '10')
+    expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('strict: less than a set, or clearing the debt, earns no breather', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
+    await start($)
+    await fit($, '5')
+    expect((await send($)).drop).toContain('Behind pace: 15 pushups')
+    await fit($, '15')
+    expect((await send($)).drop).toBeUndefined()
+    expect((await fit($, '')).text).not.toContain('breather')
+  })
+
+  test('a breather is only for today', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map(), { store: { breather: { date: '2026-10-04', until: MONDAY_9AM + HOUR } } })
+    await start($)
+    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
   })
 
   test('yesterday\'s start does not count today', { options: { strict: true } }, async ($, on) => {
