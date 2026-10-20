@@ -63,7 +63,32 @@ const onboardPick = atom({ plugin: 'terminal-gym', key: 'onboardPick' } as const
 // Same files as the `fit` shell script, so both agree.
 const files = async ($: Engine) => {
   const dir = `${(await $.env.get('HOME')) ?? ''}/.claude/fitness`
-  return { routine: `${dir}/routine.json`, log: `${dir}/log` }
+  return { routine: `${dir}/routine.json`, log: `${dir}/log`, held: `${dir}/held-prompt.md` }
+}
+
+// A prompt strict mode held back. Kept on disk as well as in the store, so a
+// refill that misses the box (a dialog up, a draft typed over it) loses nothing.
+const holdPrompt = async ($: Engine, text: string) => {
+  await $.store.set('heldPrompt', text)
+  await $.fs.write((await files($)).held, text)
+  void $.prompt.fill({ text })
+}
+
+// Hands a held prompt back once no set is owed: into an empty box, or after
+// what is there, so a /fit typed over it doesn't cost the prompt.
+const releasePrompt = async ($: Engine, p: Pace | null) => {
+  const text = (await $.store.get('heldPrompt')) as string | undefined
+  if (typeof text !== 'string' || (p !== null && p.behind > 0 && p.restUntil === null)) return
+  const draft = (await $.prompt.read()).text
+  const filled = await $.prompt.fill(
+    draft.trim() === '' || draft === text ? { text } : { text: `\n\n${text}`, mode: 'append' },
+  )
+  if (!filled.isFilled) {
+    toast($, `Your held prompt is saved in ${(await files($)).held}.`)
+    return
+  }
+  await $.store.delete('heldPrompt')
+  toast($, 'Caught up. Your held prompt is back in the box.')
 }
 
 const loadRoutine = async ($: Engine, routinePath: string): Promise<Routine> => {
@@ -281,7 +306,7 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   } else if (stillOwed <= 0 || added < 0) {
     await $.store.delete('breather')
   }
-  await refreshPace($)
+  await releasePrompt($, await refreshPace($))
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
@@ -419,7 +444,7 @@ export const register: Register = (on, options) => {
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
         await refreshToday($)
         await refreshHistory($)
-        await refreshPace($)
+        await releasePrompt($, await refreshPace($))
         return { text: `Rest day logged. Streak resets, no sets due today. Back at it tomorrow. (/fit rest off to undo)` }
       }
       case 'unskip':
@@ -495,9 +520,9 @@ export const register: Register = (on, options) => {
     const p = await refreshPace($)
     const t = await read($, today)
     if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
-      void $.prompt.fill({ text: e.text })
+      await holdPrompt($, e.text)
       return {
-        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
+        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log; your prompt comes back once you're caught up. /fit rest skips the day (breaks streak).`,
       }
     }
     return next(e)

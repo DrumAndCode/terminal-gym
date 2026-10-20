@@ -58,14 +58,20 @@ const world = (
     return { value: undefined }
   })
   on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
-  on('prompt.fill', () => ({ isFilled: true }))
+  // The prompt box: what fills write and what the mod reads back.
+  const box = { text: '' }
+  on('prompt.fill', ($, e) => {
+    box.text = e.mode === 'append' ? box.text + e.text : e.text
+    return { isFilled: true }
+  })
+  on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
   // What sits beneath the mod: a settings hook may refuse the prompt.
   const below = { refuse: undefined as string | undefined }
   on('prompt.submit', ($, e) => (below.refuse === undefined ? { text: e.text } : { drop: below.refuse }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  return { clock, files, toasts, open, config, calls, registered, below }
+  return { clock, files, toasts, open, config, calls, registered, below, box }
 }
 
 const fit = ($: Engine, args: string) =>
@@ -628,6 +634,32 @@ describe('pace', () => {
     expect(first.drop).toContain('Behind pace: 10 pushups')
     await fit($, '10')
     expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('strict: a held prompt is saved and comes back once caught up', { options: { strict: true } }, async ($, on) => {
+    const { files, box } = world(on)
+    await start($)
+    expect((await send($, 'a long prompt')).drop).toContain('comes back')
+    expect(files.get(`${HOME}/.claude/fitness/held-prompt.md`)).toBe('a long prompt')
+    // The person types over it to log a partial set: still held.
+    box.text = ''
+    await fit($, '5')
+    expect(box.text).toBe('')
+    box.text = 'half typed'
+    await fit($, '5')
+    expect(box.text).toBe('half typed\n\na long prompt')
+    box.text = ''
+    await fit($, '1')
+    expect(box.text).toBe('')
+  })
+
+  test('strict: a rest day hands the held prompt back', { options: { strict: true } }, async ($, on) => {
+    const { box } = world(on)
+    await start($)
+    await send($, 'a long prompt')
+    box.text = ''
+    await fit($, 'rest')
+    expect(box.text).toBe('a long prompt')
   })
 
   test('strict: the next set comes due on schedule, with a toast', { options: { strict: true } }, async ($, on) => {
