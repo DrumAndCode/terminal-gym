@@ -58,14 +58,20 @@ const world = (
     return { value: undefined }
   })
   on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
-  on('prompt.fill', () => ({ isFilled: true }))
+  // The prompt box: what fills write and what the mod reads back.
+  const box = { text: '' }
+  on('prompt.fill', ($, e) => {
+    box.text = e.mode === 'append' ? box.text + e.text : e.text
+    return { isFilled: true }
+  })
+  on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
   // What sits beneath the mod: a settings hook may refuse the prompt.
   const below = { refuse: undefined as string | undefined }
   on('prompt.submit', ($, e) => (below.refuse === undefined ? { text: e.text } : { drop: below.refuse }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  return { clock, files, toasts, open, config, calls, registered, below }
+  return { clock, files, toasts, open, config, calls, registered, below, box }
 }
 
 const fit = ($: Engine, args: string) =>
@@ -628,6 +634,66 @@ describe('pace', () => {
     expect(first.drop).toContain('Behind pace: 10 pushups')
     await fit($, '10')
     expect((await send($)).drop).toBeUndefined()
+  })
+
+  test('strict: a held prompt is saved and comes back once caught up', { options: { strict: true } }, async ($, on) => {
+    const { files, box, toasts } = world(on)
+    await start($)
+    expect((await send($, 'a long prompt')).drop).toContain('comes back')
+    expect(box.text).toBe('a long prompt')
+    expect(files.get(`${HOME}/.claude/fitness/held-prompt.md`)).toContain('a long prompt')
+    // The person types over it to log a partial set: still held.
+    box.text = ''
+    await fit($, '5')
+    expect(box.text).toBe('')
+    await fit($, '5')
+    expect(box.text).toBe('a long prompt')
+    expect(toasts.some(t => t.includes('back in the box'))).toBe(true)
+    // Handed back once only.
+    box.text = ''
+    await fit($, '1')
+    expect(box.text).toBe('')
+  })
+
+  test('strict: a held prompt never lands on a draft', { options: { strict: true } }, async ($, on) => {
+    const { box, toasts } = world(on)
+    await start($)
+    await send($, 'a long prompt')
+    box.text = 'a long prompt, edited'
+    await fit($, '10')
+    expect(box.text).toBe('a long prompt, edited')
+    expect(toasts.some(t => t.includes('saved in'))).toBe(true)
+  })
+
+  test('strict: a held prompt that went through is not handed back', { options: { strict: true } }, async ($, on) => {
+    const { box, files } = world(on)
+    await start($)
+    await send($, 'a long prompt')
+    // The shell script logs the set; the prompt still in the box is sent.
+    files.set(`${LOG}/2026-10-05`, '10\n')
+    expect((await send($, 'a long prompt')).drop).toBeUndefined()
+    box.text = ''
+    await fit($, '1')
+    expect(box.text).toBe('')
+  })
+
+  test('strict: every held prompt is kept on disk', { options: { strict: true } }, async ($, on) => {
+    const { files } = world(on)
+    await start($)
+    await send($, 'first')
+    await send($, 'second')
+    const held = files.get(`${HOME}/.claude/fitness/held-prompt.md`) ?? ''
+    expect(held).toContain('first')
+    expect(held).toContain('second')
+  })
+
+  test('strict: a rest day hands the held prompt back', { options: { strict: true } }, async ($, on) => {
+    const { box } = world(on)
+    await start($)
+    await send($, 'a long prompt')
+    box.text = ''
+    await fit($, 'rest')
+    expect(box.text).toBe('a long prompt')
   })
 
   test('strict: the next set comes due on schedule, with a toast', { options: { strict: true } }, async ($, on) => {

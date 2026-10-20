@@ -63,7 +63,42 @@ const onboardPick = atom({ plugin: 'terminal-gym', key: 'onboardPick' } as const
 // Same files as the `fit` shell script, so both agree.
 const files = async ($: Engine) => {
   const dir = `${(await $.env.get('HOME')) ?? ''}/.claude/fitness`
-  return { routine: `${dir}/routine.json`, log: `${dir}/log` }
+  return { routine: `${dir}/routine.json`, log: `${dir}/log`, held: `${dir}/held-prompt.md` }
+}
+
+// A prompt strict mode held back. Every one is added to a file on disk too, so
+// a refill that misses the box (a dialog up, a draft typed over it) loses nothing.
+const holdPrompt = async ($: Engine, text: string) => {
+  void $.prompt.fill({ text })
+  try {
+    const { held } = await files($)
+    const before = (await $.fs.exists(held)) ? await $.fs.read(held) : ''
+    await $.fs.write(held, `${before}--- held ${new Date(await $.clock.now()).toISOString()}\n${text}\n\n`)
+    await $.store.set('heldPrompt', text)
+  } catch {
+    // Saving is a backup: the box already has the text.
+  }
+}
+
+// A held prompt that went through after all needs no handing back.
+const forgetPrompt = async ($: Engine, text: string) => {
+  if ((await $.store.get('heldPrompt')) === text) await $.store.delete('heldPrompt')
+}
+
+// Hands a held prompt back once prompts go through again (caught up, or a
+// breather earned), but never over a draft: one there is the person's own.
+const releasePrompt = async ($: Engine, p: Pace | null) => {
+  const text = (await $.store.get('heldPrompt')) as string | undefined
+  if (typeof text !== 'string' || (p !== null && p.behind > 0 && p.restUntil === null)) return
+  await $.store.delete('heldPrompt')
+  const draft = (await $.prompt.read()).text
+  const filled = draft.trim() === '' ? await $.prompt.fill({ text }) : undefined
+  toast(
+    $,
+    filled?.isFilled === true
+      ? 'Prompts go through again. Your held prompt is back in the box.'
+      : `Prompts go through again. Your held prompt is saved in ${(await files($)).held}.`,
+  )
 }
 
 const loadRoutine = async ($: Engine, routinePath: string): Promise<Routine> => {
@@ -281,7 +316,7 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   } else if (stillOwed <= 0 || added < 0) {
     await $.store.delete('breather')
   }
-  await refreshPace($)
+  await releasePrompt($, await refreshPace($))
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
   }
@@ -419,7 +454,7 @@ export const register: Register = (on, options) => {
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
         await refreshToday($)
         await refreshHistory($)
-        await refreshPace($)
+        await releasePrompt($, await refreshPace($))
         return { text: `Rest day logged. Streak resets, no sets due today. Back at it tomorrow. (/fit rest off to undo)` }
       }
       case 'unskip':
@@ -495,11 +530,12 @@ export const register: Register = (on, options) => {
     const p = await refreshPace($)
     const t = await read($, today)
     if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
-      void $.prompt.fill({ text: e.text })
+      await holdPrompt($, e.text)
       return {
-        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
+        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log; your prompt comes back when prompts go through again. /fit rest skips the day (breaks streak).`,
       }
     }
+    await forgetPrompt($, e.text)
     return next(e)
   })
 
