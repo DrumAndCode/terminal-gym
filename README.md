@@ -39,7 +39,7 @@ Strict mode spreads today's goal into evenly spaced sets over a training window 
 
 Fall more than a set behind and you don't have to pay it all back to back. Log one full set and you earn a breather of half the gap between sets (about 26 minutes with the defaults): prompts go through, the band reads `behind 10 · breather to 10:26`, and a toast calls the next set when it ends. Log less than a set and your prompts still wait.
 
-A held prompt is never lost. Its text goes back in the prompt box and is saved to `~/.claude/fitness/held-prompt.md`. When you catch up or take a rest day, the mod puts the prompt back in the box. If the box is empty, the prompt replaces it. If you typed something else, the prompt goes after your text.
+A held prompt goes back in the prompt box, and every held prompt is added to `~/.claude/fitness/held-prompt.md`. When prompts go through again (you caught up, earned a breather, or took a rest day), the mod puts the last held prompt back in an empty box. If you typed something else meanwhile, the mod leaves your draft alone and points you to the file.
 
 Only prompts you type can be held. Background tasks, `/loop` runs, messages from other sessions and slash commands like `/fit 10` always go through. Prompts before 5am count as the night before, so a late night never leaves you a wall of overdue sets in the morning.
 
@@ -91,12 +91,12 @@ The mod makes no network calls and adds no hidden context for the model. `/fit` 
 
 A mod runs inside Claude Code, so here is everything Terminal Gym touches:
 
-- **Files it writes:** only its own data in `~/.claude/fitness`: the routine, the daily logs listed above, `held-prompt.md` (the last prompt strict mode held), and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
+- **Files it writes:** only its own data in `~/.claude/fitness`: the routine, the daily logs listed above, `held-prompt.md` (each prompt strict mode held), and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
 - **Its own store:** a few values in the mod's per-plugin store inside Claude Code: today's start time, the streak cache, a held prompt waiting to come back, and whether you've seen the welcome.
 - **Settings it changes:** `/fit strict` and `/fit easy` turn its own *Strict mode* setting (`terminal-gym.strict`) on and off. That's the only setting it changes. It sets no environment variables; it reads `HOME` to find `~/.claude/fitness`.
 - **Permissions:** it never approves or denies a tool call, never changes your permission mode, and never runs a model or a process.
 - **Events it hooks:**
-  - `prompt.submit`: in strict mode, holds a prompt you typed while you're behind pace, saves it, and puts its text back in the prompt box. It hands the prompt back again once you catch up. Easy mode lets everything through. Prompts from other sources are never touched.
+  - `prompt.submit`: in strict mode, holds a prompt you typed while you're behind pace, saves it, and puts its text back in the prompt box. It hands the prompt back again once prompts go through. Easy mode lets everything through. Prompts from other sources are never touched.
   - `command.run`: answers its own `/fit` command, and nothing else.
   - `session.start` and the SessionStart event after `/clear` or `/resume`: load today's state and register `/fit`. The event passes through unchanged.
   - `turn.start` and `turn.complete`: time the easy-mode nudge and refresh the band.

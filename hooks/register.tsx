@@ -66,29 +66,39 @@ const files = async ($: Engine) => {
   return { routine: `${dir}/routine.json`, log: `${dir}/log`, held: `${dir}/held-prompt.md` }
 }
 
-// A prompt strict mode held back. Kept on disk as well as in the store, so a
-// refill that misses the box (a dialog up, a draft typed over it) loses nothing.
+// A prompt strict mode held back. Every one is added to a file on disk too, so
+// a refill that misses the box (a dialog up, a draft typed over it) loses nothing.
 const holdPrompt = async ($: Engine, text: string) => {
-  await $.store.set('heldPrompt', text)
-  await $.fs.write((await files($)).held, text)
   void $.prompt.fill({ text })
+  try {
+    const { held } = await files($)
+    const before = (await $.fs.exists(held)) ? await $.fs.read(held) : ''
+    await $.fs.write(held, `${before}--- held ${new Date(await $.clock.now()).toISOString()}\n${text}\n\n`)
+    await $.store.set('heldPrompt', text)
+  } catch {
+    // Saving is a backup: the box already has the text.
+  }
 }
 
-// Hands a held prompt back once no set is owed: into an empty box, or after
-// what is there, so a /fit typed over it doesn't cost the prompt.
+// A held prompt that went through after all needs no handing back.
+const forgetPrompt = async ($: Engine, text: string) => {
+  if ((await $.store.get('heldPrompt')) === text) await $.store.delete('heldPrompt')
+}
+
+// Hands a held prompt back once prompts go through again (caught up, or a
+// breather earned), but never over a draft: one there is the person's own.
 const releasePrompt = async ($: Engine, p: Pace | null) => {
   const text = (await $.store.get('heldPrompt')) as string | undefined
   if (typeof text !== 'string' || (p !== null && p.behind > 0 && p.restUntil === null)) return
-  const draft = (await $.prompt.read()).text
-  const filled = await $.prompt.fill(
-    draft.trim() === '' || draft === text ? { text } : { text: `\n\n${text}`, mode: 'append' },
-  )
-  if (!filled.isFilled) {
-    toast($, `Your held prompt is saved in ${(await files($)).held}.`)
-    return
-  }
   await $.store.delete('heldPrompt')
-  toast($, 'Caught up. Your held prompt is back in the box.')
+  const draft = (await $.prompt.read()).text
+  const filled = draft.trim() === '' ? await $.prompt.fill({ text }) : undefined
+  toast(
+    $,
+    filled?.isFilled === true
+      ? 'Prompts go through again. Your held prompt is back in the box.'
+      : `Prompts go through again. Your held prompt is saved in ${(await files($)).held}.`,
+  )
 }
 
 const loadRoutine = async ($: Engine, routinePath: string): Promise<Routine> => {
@@ -522,9 +532,10 @@ export const register: Register = (on, options) => {
     if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
       await holdPrompt($, e.text)
       return {
-        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log; your prompt comes back once you're caught up. /fit rest skips the day (breaks streak).`,
+        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log; your prompt comes back when prompts go through again. /fit rest skips the day (breaks streak).`,
       }
     }
+    await forgetPrompt($, e.text)
     return next(e)
   })
 
