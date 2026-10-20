@@ -282,7 +282,7 @@ Off by default. When it's on:
 - prompts before 5am count as the night before
 - the first set is due right away
 - fall behind and your prompts wait until you catch up
-- two or more sets behind? one set earns a breather before the rest
+- more than a set behind? one set earns a breather before the rest
 - a toast tells you when each set comes due
 - \`/fit rest\` bails, but costs your streak
 

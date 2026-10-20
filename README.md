@@ -34,7 +34,7 @@ Strict mode spreads today's goal into evenly spaced sets over a training window 
 | …about every 53 minutes… | Ten sets in all, the last due 8 hours after your first prompt |
 | Goal done, or a rest day | Nothing waits |
 
-Fall two or more sets behind and you don't have to pay it all back to back. Log one full set and you earn a breather of half the gap between sets (about 26 minutes with the defaults): prompts go through, the band reads `behind 10 · breather to 10:26`, and a toast calls the next set when it ends. Log less than a set and your prompts still wait.
+Fall more than a set behind and you don't have to pay it all back to back. Log one full set and you earn a breather of half the gap between sets (about 26 minutes with the defaults): prompts go through, the band reads `behind 10 · breather to 10:26`, and a toast calls the next set when it ends. Log less than a set and your prompts still wait.
 
 Only prompts you type can be held. Background tasks, `/loop` runs, messages from other sessions and slash commands like `/fit 10` always go through. Prompts before 5am count as the night before, so a late night never leaves you a wall of overdue sets in the morning.
 

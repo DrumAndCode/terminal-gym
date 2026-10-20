@@ -272,9 +272,14 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   )
 
   // A full set that still leaves reps owed earns a breather before the rest.
-  if (owed !== null && owed.behind - (count - before.count) > 0 && count - before.count >= owed.setSize) {
+  // Clearing the debt or lowering the count ends one, so later sets aren't hidden.
+  const added = count - before.count
+  const stillOwed = owed === null ? 0 : owed.behind - added
+  if (owed !== null && stillOwed > 0 && added >= owed.setSize) {
     const until = (await $.clock.now()) + breatherMs(after.goal, owed.setSize, paceConfig.windowMs)
     await $.store.set('breather', { date: after.date, until })
+  } else if (stillOwed <= 0 || added < 0) {
+    await $.store.delete('breather')
   }
   await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {

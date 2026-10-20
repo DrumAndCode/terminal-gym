@@ -724,6 +724,21 @@ describe('pace', () => {
     expect((await fit($, '')).text).not.toContain('breather')
   })
 
+  test('strict: clearing the debt or resetting ends the breather, so the next set is not hidden', { options: { strict: true } }, async ($, on) => {
+    const { clock, toasts } = world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - 2 * GAP + 60_000 } } })
+    await start($)
+    expect((await fit($, '10')).text).toContain('breather to')
+    await fit($, '10')
+    await clock.advance(61_000)
+    expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 30/100 by now.'))).toBe(true)
+    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
+    expect((await fit($, '10')).text).not.toContain('breather')
+    await fit($, '10')
+    expect((await send($)).drop).toBeUndefined()
+    await fit($, 'reset')
+    expect((await send($)).drop).toContain('Behind pace: 30 pushups')
+  })
+
   test('a breather is only for today', { options: { strict: true } }, async ($, on) => {
     world(on, new Map(), { store: { breather: { date: '2026-10-04', until: MONDAY_9AM + HOUR } } })
     await start($)
