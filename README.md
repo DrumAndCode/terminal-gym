@@ -41,7 +41,7 @@ You don't have to pay a debt back all at once. Log a set, even a short one (at l
 
 A held prompt goes back in the prompt box, so you can send it again once you've logged the set.
 
-Just eaten, or mid-call? `/fit later 30` puts the due set off for 30 minutes (up to 60) without logging anything: prompts go through, the band reads `20 due · back at 13:05`, and a toast calls the set when time is up. Each due set can be put off once, and twice a day in all; after that it's a set, even a short one, or `/fit easy`.
+Just eaten, or mid-call? `/fit later 30` puts the due set off for 30 minutes (up to 60) without logging anything: prompts go through, the band reads `20 due · back at 13:05`, and a toast calls the set when time is up. Each due set can be put off once, and twice a day in all; after that it's a set, even a short one, or `/fit easy`. A `/fit goal` or `/fit window` meanwhile keeps the put-off: the time you asked for stands, and the set due when it ends is the new one.
 
 Know you only have a few hours today? `/fit window 3` spreads the reps you still owe over the next 3 hours, starting now. A window ends by midnight, because the day's log does. The first of those sets is due straight away. `/fit window off` goes back to the default window. `/fit goal 60` changes today's goal and leaves your routine alone.
 

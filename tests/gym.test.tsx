@@ -1108,6 +1108,32 @@ describe('pace', () => {
     expect((await fit($, 'later')).text).toContain("Today's goal is done")
   })
 
+  test('/fit goal and /fit window keep a put-off; clearing the debt forgets it', { options: { strict: true } }, async ($, on) => {
+    const { clock, files } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
+    await start($)
+    expect((await fit($, 'later')).text).toContain('20 pushups put off until 09:30')
+    // The goal changes which set is due, not the time asked for: the band still says so.
+    expect((await fit($, 'goal 60')).text).toContain('due · back at 09:30')
+    expect((await send($)).drop).toBeUndefined()
+    expect((await fit($, 'later')).text).toContain('Already put off until 09:30')
+    // When the time is up, it's the new set that was put off, so it can't be put off again.
+    await clock.advance(30 * 60_000 + 1_000)
+    expect((await send($)).drop).toContain('pushups due now')
+    expect((await fit($, 'later')).text).toContain('already put off once')
+    // Clearing the debt forgets the set that was put off.
+    await fit($, 'set 30')
+    expect(JSON.parse(files.get(`${LOG}/2026-10-05.day`) ?? '{}')).not.toHaveProperty('putOff')
+    // A fresh window's first set is due now, and is a set of its own: it can be put off.
+    expect((await fit($, 'window 2')).text).toContain('due now')
+    expect((await fit($, 'later 10')).text).toContain('put off until')
+    // Without a put-off, a window change still ends an ordinary breather: two
+    // sets in, a short set leaves reps owed and earns one.
+    await clock.advance(34 * 60_000 + 1_000)
+    expect((await fit($, '5')).text).toContain('rest for')
+    expect((await fit($, 'window 1')).text).toContain('due now')
+    expect((await send($)).drop).toContain('pushups due now')
+  })
+
   test('strict: a breather earned in another session holds nothing here', { options: { strict: true } }, async ($, on) => {
     const { clock, touch } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
     await start($)

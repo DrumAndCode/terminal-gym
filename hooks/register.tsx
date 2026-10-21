@@ -261,7 +261,24 @@ const startDay = async ($: Engine) => {
   if ((await dayStart($, date)) === undefined) await writeDayState($, date, s => ({ ...s, start: now }))
 }
 
-const endBreather = ($: Engine, date: string) => writeDayState($, date, ({ breather: _, ...rest }) => rest)
+// Ends a breather, and forgets which set a `/fit later` put off: with the debt
+// cleared or the count lowered, that set is no longer the one due.
+const endBreather = ($: Engine, date: string) =>
+  writeDayState($, date, ({ breather: _b, putOff: _p, ...rest }) => rest)
+
+// `/fit goal` and `/fit window` change which set is due. A breather sized for
+// the old schedule ends. A put-off keeps its time, since the person's minutes
+// set it, not the goal, and it now names the new due point.
+const reschedule = async ($: Engine, date: string): Promise<Pace | null> => {
+  const now = await $.clock.now()
+  const { breather, putOff } = await readDayState($, date)
+  const kept = putOff !== undefined && breather !== undefined && breather > now
+  await writeDayState($, date, ({ breather: b, putOff: _, ...rest }) => (kept ? { ...rest, breather: b } : rest))
+  const p = await refreshPace($)
+  if (!kept || p === null) return p
+  await writeDayState($, date, s => ({ ...s, putOff: p.required }))
+  return refreshPace($)
+}
 
 // The span today's sets are spread over: the configured window from the first
 // prompt, or after `/fit window`, the reps left then (above `base`) over the hours named.
@@ -629,20 +646,16 @@ export const register: Register = (on, options) => {
         if (before.isRest) return { text: "Today's a rest day. /fit rest off to train." }
         const plan = { exercise: before.exercise, goal: cmd.n, ...(before.unit === '' ? {} : { unit: before.unit }) }
         await $.fs.write(`${(await files($)).log}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
-        // A breather was sized for the old goal.
-        await endBreather($, before.date)
         await refreshHistory($)
         const after = await refreshToday($)
-        return { text: `Today's goal is ${cmd.n}${after.unit} ${after.exercise}. ${line(after)}${paceText(await refreshPace($), isStrict, await $.clock.now())}` }
+        return { text: `Today's goal is ${cmd.n}${after.unit} ${after.exercise}. ${line(after)}${paceText(await reschedule($, before.date), isStrict, await $.clock.now())}` }
       }
       case 'window': {
         const t = await refreshToday($)
-        // A breather was sized for the old window.
-        await endBreather($, t.date)
         if (cmd.hours === null) {
           await writeDayState($, t.date, ({ window: _, ...rest }) => rest)
           return {
-            text: `Back to ${paceConfig.windowMs / HOUR_MS}h from your first prompt. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
+            text: `Back to ${paceConfig.windowMs / HOUR_MS}h from your first prompt. ${line(t)}${paceText(await reschedule($, t.date), isStrict, await $.clock.now())}`,
           }
         }
         if (t.isRest) return { text: "Today's a rest day. /fit rest off to train." }
@@ -657,7 +670,7 @@ export const register: Register = (on, options) => {
         await writeDayState($, t.date, s => ({ ...s, window: { from: now, ms, base: t.count } }))
         const span = ms < cmd.hours * HOUR_MS ? 'between now and midnight' : `over the next ${cmd.hours}h (done by ${clockTime(now + ms)})`
         return {
-          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread ${span}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
+          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread ${span}. ${line(t)}${paceText(await reschedule($, t.date), isStrict, await $.clock.now())}`,
         }
       }
       case 'window-until': {
@@ -671,9 +684,9 @@ export const register: Register = (on, options) => {
         const named = `${String(cmd.hour).padStart(2, '0')}:${String(cmd.minute).padStart(2, '0')}`
         if (end <= now) return { text: `${named} has already passed today. 3–4 digits are a clock time (1240 = 12:40); for hours from now, use 1–2 digits like /fit window 2.` }
         // The same window `/fit window <hours>` sets, ending at the time named.
-        await writeDayState($, t.date, ({ breather: _, ...s }) => ({ ...s, window: { from: now, ms: end - now, base: t.count } }))
+        await writeDayState($, t.date, s => ({ ...s, window: { from: now, ms: end - now, base: t.count } }))
         return {
-          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread between now and ${named}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
+          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread between now and ${named}. ${line(t)}${paceText(await reschedule($, t.date), isStrict, await $.clock.now())}`,
         }
       }
       case 'later': {
