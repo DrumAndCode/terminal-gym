@@ -43,6 +43,7 @@ export type FitCommand =
   | { kind: 'unskip' }
   | { kind: 'help' }
   | { kind: 'hide' }
+  | { kind: 'reload' }
   | { kind: 'reset' }
   | { kind: 'intro' }
   | { kind: 'program' }
@@ -56,7 +57,7 @@ export type FitCommand =
   | { kind: 'window-until'; hour: number; minute: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | start | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -71,6 +72,7 @@ export const parseFit = (args: string): FitCommand => {
   }
   if (head === 'rules') return { kind: 'help' }
   if (head === 'hide') return { kind: 'hide' }
+  if (head === 'reload' || head === 'sync') return { kind: 'reload' }
   if (head === 'reset') return { kind: 'reset' }
   if (head === 'start') return { kind: 'intro' }
   if (head === 'strict') return { kind: 'strict', isOn: value !== 'off' }
@@ -348,6 +350,7 @@ or press a **+** button above the prompt (sized to your set)
 | \`/fit program\` | pick your training |
 | \`/fit strict\` / \`/fit easy\` | strict mode on / off |
 | \`/fit rules\` | these rules |
+| \`/fit reload\` | re-read the log now (other sessions sync every 10s anyway) |
 | \`/fit start\` | replay the welcome |
 | \`/fit hide\` | close panels |
 

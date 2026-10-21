@@ -47,6 +47,10 @@ Only prompts you type can be held. Background tasks, `/loop` runs, messages from
 
 Easy mode (the default) shows the same schedule on the band and the same reminders, but never holds a prompt.
 
+## Several sessions at once
+
+Every Claude Code session reads the same log in `~/.claude/fitness`, so a set you log in one counts in all of them. Each session checks the log every 10 seconds and redraws its band when another session, or the shell, wrote to it. `/fit reload` does the same read right away.
+
 ## Commands
 
 | Command | Does |
@@ -65,6 +69,7 @@ Easy mode (the default) shows the same schedule on the band and the same reminde
 | `/fit program` | pick your program (the walkthrough), or **Custom goals** to type each exercise's daily goal |
 | `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit rules` | house rules |
+| `/fit reload` | re-read today's log from disk now (`/fit sync` works too) |
 | `/fit start` | replay the welcome |
 | `/fit hide` | close panels |
 
@@ -91,13 +96,14 @@ The mod makes no network calls and adds no hidden context for the model. `/fit` 
 - `log/YYYY-MM-DD`: that day's count.
 - `log/YYYY-MM-DD.skip`: a rest day. If it contains `off`, the rest day was undone.
 - `log/YYYY-MM-DD.swap`: that day's plan after `/fit swap` or `/fit goal`, in the same shape as a routine day.
+- `log/YYYY-MM-DD.day`: that day's pace, for example `{ "start": 1760000000000, "window": { "from": …, "ms": …, "base": 0 }, "breather": … }`: when the day started (your first prompt), a `/fit window`, and when a breather ends, as milliseconds since the epoch.
 
 ## What it does inside Claude Code
 
 A mod runs inside Claude Code, so here is everything Terminal Gym touches:
 
 - **Files it writes:** only its own data in `~/.claude/fitness`: the routine, the daily logs listed above, and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
-- **Its own store:** a few values in the mod's per-plugin store inside Claude Code: today's start time, any `/fit window` set for today, the streak cache, and whether you've seen the welcome.
+- **Its own store:** two values in the mod's per-plugin store inside Claude Code: the streak cache and whether you've seen the welcome. Everything sessions share (today's start, a `/fit window`, a breather) is in the day's file above, so every session reads the same one.
 - **Settings it changes:** `/fit strict` and `/fit easy` turn its own *Strict mode* setting (`terminal-gym.strict`) on and off. That's the only setting it changes. It sets no environment variables; it reads `HOME` to find `~/.claude/fitness`.
 - **Permissions:** it never approves or denies a tool call, never changes your permission mode, and never runs a model or a process.
 - **Events it hooks:**
@@ -105,6 +111,7 @@ A mod runs inside Claude Code, so here is everything Terminal Gym touches:
   - `command.run`: answers its own `/fit` command, and nothing else.
   - `session.start` and the SessionStart event after `/clear` or `/resume`: load today's state and register `/fit`. The event passes through unchanged.
   - `turn.start` and `turn.complete`: time the easy-mode nudge and refresh the band.
+  - a timer every 10 seconds: lists `~/.claude/fitness/log` and re-reads it when a file changed, so sessions stay in step.
   - `ui.render`: draws the band, the scoreboard, the house rules and the walkthrough, and (easy mode) the suggested set in the spinner.
 
 ## Requirements
