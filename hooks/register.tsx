@@ -543,8 +543,9 @@ export const register: Register = (on, options) => {
     await startDay($)
     const p = await refreshPace($)
     const t = await read($, today)
+    // Claude Code puts a dropped prompt back in the box itself; a fill here
+    // as well left it there twice.
     if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
-      void $.prompt.fill({ text: e.text })
       return {
         drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
       }

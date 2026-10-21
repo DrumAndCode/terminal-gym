@@ -639,11 +639,12 @@ describe('pace', () => {
     expect((await send($)).drop).toBeUndefined()
   })
 
-  test('strict: a held prompt goes back in the box', { options: { strict: true } }, async ($, on) => {
+  // Claude Code restores a dropped prompt; a fill of the mod's own doubled it.
+  test('strict: a held prompt is left to Claude Code to restore', { options: { strict: true } }, async ($, on) => {
     const { box } = world(on)
     await start($)
     expect((await send($, 'a long prompt')).drop).toContain('Behind pace')
-    expect(box.text).toBe('a long prompt')
+    expect(box.text).toBe('')
   })
 
   test('/fit goal changes today only, and the pace follows', async ($, on) => {
