@@ -51,12 +51,6 @@
       "description": "How long a turn runs before Terminal Gym suggests a set.",
       "default": 30
     },
-    "nudgeReps": {
-      "type": "number",
-      "title": "Reps per nudge",
-      "description": "Reps suggested per long turn in easy mode.",
-      "default": 10
-    },
     "spinner": {
       "type": "boolean",
       "title": "Spinner takeover",

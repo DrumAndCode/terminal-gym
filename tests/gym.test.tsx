@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, cells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak } from '../hooks/lib'
+import { buttonsWidth, cells, heatCells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -97,6 +97,12 @@ describe('lib', () => {
     expect(parseFit('set x').kind).toBe('error')
     expect(parseFit('dance').kind).toBe('error')
     expect(parseFit('strict')).toEqual({ kind: 'strict', isOn: true })
+    expect(parseFit('strict off')).toEqual({ kind: 'strict', isOn: false })
+    expect(parseFit('window 1240')).toEqual({ kind: 'window-until', hour: 12, minute: 40 })
+    expect(parseFit('window 9:05')).toEqual({ kind: 'window-until', hour: 9, minute: 5 })
+    expect(parseFit('window 940')).toEqual({ kind: 'window-until', hour: 9, minute: 40 })
+    expect(parseFit('window 3')).toEqual({ kind: 'window', hours: 3 })
+    expect(parseFit('window 2560').kind).toBe('error')
     expect(parseFit('easy')).toEqual({ kind: 'strict', isOn: false })
     expect(parseFit('reset')).toEqual({ kind: 'reset' })
     expect(parseFit('rest')).toEqual({ kind: 'skip' })
@@ -121,9 +127,8 @@ describe('setup helpers', () => {
     expect(parseCustom('burpees')).toBeUndefined()
     expect(scale({ mon: { exercise: 'dips', goal: 100 } }, 0.5).mon?.goal).toBe(50)
     expect(progressColor(0, 100)).toBeUndefined()
-    expect(progressColor(1, 100)).toBe('#d75f5f')
-    expect(progressColor(33, 100)).toBe('#d75f5f')
-    expect(progressColor(34, 100)).toBe('#d7af5f')
+    expect(progressColor(1, 100)).toBe('#d7af5f')
+    expect(progressColor(33, 100)).toBe('#d7af5f')
     expect(progressColor(79, 100)).toBe('#d7af5f')
     expect(progressColor(80, 100)).toBe('#87af87')
     expect(progressColor(100, 100)).toBe('#87af87')
@@ -172,6 +177,27 @@ describe('nudges', () => {
     expect(files.has(`${LOG}/2026-10-05.skip`)).toBe(true)
     const submitted = await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
     expect(submitted.drop).toBeUndefined()
+  })
+
+  test('/fit rest refuses once reps are logged today', async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-05`, '20\n']]))
+    await start($)
+    expect((await fit($, 'rest')).text).toContain("so it's a training day")
+    expect(files.has(`${LOG}/2026-10-05.skip`)).toBe(false)
+  })
+
+  test('a nudge suggests the set that is due, and none right after one', async ($, on) => {
+    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05.swap`, '{"exercise":"squats","goal":500}\n']]))
+    await start($)
+    await send($)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await clock.advance(31_000)
+    expect(toasts.some(t => t.includes('You next: 50 squats.'))).toBe(true)
+    await fit($, '50')
+    toasts.length = 0
+    await $.turn.start({ text: 'go', turnId: 't2' })
+    await clock.advance(31_000)
+    expect(toasts.some(t => t.includes('You next'))).toBe(false)
   })
 
   test('no nudge once the goal is met', async ($, on) => {
@@ -234,7 +260,7 @@ describe('drawing', () => {
       ]),
     )
     await start($)
-    await fit($, 'score')
+    await fit($, 'streak')
     for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
       const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...PANE })
       expect(await ui.find({ type: 'Text', text: /2-day streak/ })).toBeDefined()
@@ -284,12 +310,13 @@ describe('first run', () => {
     expect(open.has('gym-help')).toBe(false)
   })
 
-  test('/fit score toggles the pane', async ($, on) => {
+  test('/fit streak toggles the pane', async ($, on) => {
     const { open } = world(on)
     await start($)
-    await fit($, 'score')
+    await fit($, 'streak')
     expect(open.has('gym-week')).toBe(true)
-    const again = await fit($, 'score')
+    const again = await fit($, 'streak')
+    expect((await fit($, 'score')).text).toContain('usage')
     expect(again.text).toContain('closed')
     expect(open.has('gym-week')).toBe(false)
   })
@@ -339,7 +366,7 @@ describe('walkthrough', () => {
     expect(await ui.find({ type: 'Text', text: '400 squats' })).toBeDefined()
     await ui.press({ key: 'next' })
     expect(await ui.find({ type: 'Text', text: /🔥4d/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /fit score/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /fit streak/ })).toBeDefined()
     await ui.press({ key: 'finish' })
     await ui.unmount()
 
@@ -349,6 +376,60 @@ describe('walkthrough', () => {
     expect(await band.find({ type: 'Text', text: '🔥2d' })).toBeDefined()
     expect(await band.find({ type: 'Text', text: 'log reps: ' })).toBeDefined()
     await band.unmount()
+  })
+
+  test('custom goals are typed per exercise and keep the days', async ($, on) => {
+    const { files } = world(on)
+    await start($)
+    await fit($, 'program')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...ONBOARD })
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ key: 'goal-pushups' })).toBeUndefined()
+    await ui.press({ key: 'program-3' })
+    expect(await ui.find({ key: 'size-Heavy' })).toBeUndefined()
+    await ui.input({ key: 'goal-pushups', text: '120', kind: 'change' })
+    await ui.input({ key: 'goal-squats', text: 'lots' })
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /whole number above 0/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Pick your program/ })).toBeDefined()
+    await ui.input({ key: 'goal-squats', text: '250' })
+    expect(await ui.find({ type: 'Text', text: '120 pushups / 100 dips / 250 squats' })).toBeDefined()
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'finish' })
+    await ui.unmount()
+
+    const routine = JSON.parse(files.get(`${HOME}/.claude/fitness/routine.json`) ?? '{}')
+    expect(routine.mon).toEqual({ exercise: 'pushups', goal: 120 })
+    expect(routine.tue).toEqual({ exercise: 'dips', goal: 100 })
+    expect(routine.sat).toEqual({ exercise: 'squats', goal: 250 })
+  })
+
+  test('the mobile walkthrough offers no custom goals', async ($, on) => {
+    world(on)
+    await start($)
+    await fit($, 'program')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'mobile', ...ONBOARD })
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ key: 'program-2' })).toBeDefined()
+    expect(await ui.find({ key: 'program-3' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a new program leaves the days before it at the goals they had', async ($, on) => {
+    // Sunday's 100 pushups were the goal then; a squats program mustn't rewrite it.
+    const { files } = world(on, new Map([[`${LOG}/2026-10-04`, '100\n'], [`${LOG}/2026-10-03.swap`, '{"exercise":"burpees","goal":20}\n']]))
+    await start($)
+    await fit($, 'program')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...ONBOARD })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'program-2' })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'finish' })
+    await ui.unmount()
+    expect(JSON.parse(files.get(`${LOG}/2026-10-04.swap`) ?? '{}')).toEqual({ exercise: 'pushups', goal: 100 })
+    // A day already swapped keeps its own plan, and today takes the new one.
+    expect(JSON.parse(files.get(`${LOG}/2026-10-03.swap`) ?? '{}')).toEqual({ exercise: 'burpees', goal: 20 })
+    expect(files.has(`${LOG}/2026-10-05.swap`)).toBe(false)
   })
 
   test('/fit reset puts today back to zero', async ($, on) => {
@@ -431,7 +512,7 @@ describe('swap edge cases', () => {
 test('the scoreboard draws the barbell when it fits and the name alone when narrow', async ($, on) => {
   world(on)
   await start($)
-  await fit($, 'score')
+  await fit($, 'streak')
   const wide = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
   expect(await wide.find({ type: 'Text', text: '▐█▌▐█▌━━━' })).toBeDefined()
   await wide.unmount()
@@ -444,7 +525,7 @@ test('the scoreboard draws the barbell when it fits and the name alone when narr
 test('the barbell is terminal-only; other surfaces show the name', async ($, on) => {
   world(on)
   await start($)
-  await fit($, 'score')
+  await fit($, 'streak')
   for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...PANE })
     expect(await ui.find({ type: 'Text', text: '▐█▌' })).toBeUndefined()
@@ -537,7 +618,6 @@ test('below the wordmark width the band shows the bare name', async ($, on) => {
 test('a rest day hides the rep buttons and offers a way back', async ($, on) => {
   world(on)
   await start($)
-  await fit($, '20')
   await fit($, 'rest')
   const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /Rest day · pushups back tomorrow/ })).toBeDefined()
@@ -608,11 +688,22 @@ test('Pick your training opens the walkthrough before any other work', async ($,
 test('score rows name each day\'s exercise', async ($, on) => {
   world(on, new Map([[`${LOG}/2026-10-03`, '300\n'], [`${LOG}/2026-10-05`, '15\n']]))
   await start($)
-  await fit($, 'score')
+  await fit($, 'streak')
   const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /10-03  300\/300  squats/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /10-05  15\/100   pushups/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /300\/300  squats/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /15\/100   pushups/ })).toBeDefined()
+  // Each day carries its own bar; today's progress isn't repeated above.
+  expect(await ui.find({ type: 'Text', text: '━━━━━━━━━━' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '━' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '─────────' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /💪/ })).toBeUndefined()
   await ui.unmount()
+})
+
+test('the grid leaves a blank row between weeks', async () => {
+  const day = { date: 'd', count: 0, goal: 100, exercise: 'dips', isSkipped: false }
+  expect(heatCells(Array.from({ length: 28 }, () => day)).rows).toBe(7)
+  expect(heatCells(Array.from({ length: 7 }, () => day)).rows).toBe(1)
 })
 
 test('/clear and /resume run the setup again', async ($, on) => {
@@ -658,7 +749,7 @@ describe('pace', () => {
     world(on)
     await start($)
     const first = await send($)
-    expect(first.drop).toContain('Behind pace: 10 pushups')
+    expect(first.drop).toContain('Start the day with a set: 10 pushups')
     await fit($, '10')
     expect((await send($)).drop).toBeUndefined()
   })
@@ -667,7 +758,7 @@ describe('pace', () => {
   test('strict: a held prompt is left to Claude Code to restore', { options: { strict: true } }, async ($, on) => {
     const { box } = world(on)
     await start($)
-    expect((await send($, 'a long prompt')).drop).toContain('Behind pace')
+    expect((await send($, 'a long prompt')).drop).toContain('Start the day with a set')
     expect(box.text).toBe('')
   })
 
@@ -698,7 +789,7 @@ describe('pace', () => {
     // 90 left in sets of 10 over 3h: the first due now, then every 22.5 minutes.
     const ran = await fit($, 'window 3')
     expect(ran.text).toContain('90 pushups left, spread over the next 3h (done by 13:00)')
-    expect((await send($)).drop).toContain('(20/100 due by now)')
+    expect((await send($)).drop).toContain('(20/100 by now)')
     expect((await fit($, '10')).text).toContain('next set 10:22')
     await clock.advance(23 * 60_000)
     expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 30/100 by now.'))).toBe(true)
@@ -714,16 +805,23 @@ describe('pace', () => {
     // The last of the ten sets comes due before midnight, not on it.
     await fit($, '90')
     await clock.set(new Date(2026, 9, 5, 23, 59).getTime())
-    expect((await fit($, '')).text).toContain('behind 10')
+    expect((await fit($, '')).text).toContain('10 due now')
     await fit($, 'goal 1')
     await fit($, '1')
     expect((await fit($, 'window 3')).text).toContain("Today's goal is done")
   })
 
+  test('/fit window 1240 ends the window at that time today', async ($, on) => {
+    world(on)
+    await start($)
+    expect((await fit($, 'window 1240')).text).toContain('100 pushups left, spread between now and 12:40')
+    expect((await fit($, 'window 0830')).text).toContain('08:30 has already passed today')
+  })
+
   test('a window is only for today', { options: { strict: true } }, async ($, on) => {
     world(on, new Map(), { store: { window: { date: '2026-10-04', from: MONDAY_9AM - 20 * HOUR, ms: HOUR, base: 0 } } })
     await start($)
-    expect((await send($)).drop).toContain('10/100 due by now')
+    expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
   })
 
   test('strict: the next set comes due on schedule, with a toast', { options: { strict: true } }, async ($, on) => {
@@ -735,7 +833,7 @@ describe('pace', () => {
     expect((await send($)).drop).toBeUndefined()
     await clock.advance(2_000)
     expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 20/100 by now.'))).toBe(true)
-    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
+    expect((await send($)).drop).toContain('10 pushups due now')
     await fit($, '10')
     expect((await send($)).drop).toBeUndefined()
   })
@@ -745,8 +843,8 @@ describe('pace', () => {
     await start($)
     expect((await send($)).drop).toBeUndefined()
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /behind 10/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /prompts wait/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /first set: 10 to start the day/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /keep prompting/ })).toBeUndefined()
     await ui.press({ key: 'add10' })
     expect(await ui.find({ type: 'Text', text: /next set 09:53/ })).toBeDefined()
     await ui.unmount()
@@ -755,12 +853,12 @@ describe('pace', () => {
     expect((await send($)).drop).toBeUndefined()
   })
 
-  test('strict: the band says prompts wait while behind', { options: { strict: true } }, async ($, on) => {
+  test('strict: the band says to log the due set to keep prompting', { options: { strict: true } }, async ($, on) => {
     world(on)
     await start($)
     await send($)
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /behind 10 · prompts wait/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /first set: 10 to start the day/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -769,7 +867,7 @@ describe('pace', () => {
     await start($)
     const bg = await $.prompt.submit({ text: 'task done', wait: false, origin: { kind: 'task-notification' } })
     expect(bg.drop).toBeUndefined()
-    expect((await send($, '/fit score')).drop).toBeUndefined()
+    expect((await send($, '/fit streak')).drop).toBeUndefined()
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
     expect(await ui.find({ type: 'Text', text: /behind/ })).toBeUndefined()
     await ui.unmount()
@@ -794,57 +892,66 @@ describe('pace', () => {
   test('strict: a set logged while two behind earns a breather, then the rest is due', { options: { strict: true } }, async ($, on) => {
     const { clock, toasts } = world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
     await start($)
-    expect((await send($)).drop).toContain('Behind pace: 20 pushups')
-    expect((await fit($, '10')).text).toContain('behind 10 · breather to 09:26')
+    expect((await send($)).drop).toContain('20 pushups due now')
+    expect((await fit($, '10')).text).toContain('10 due · rest for 27m')
     expect((await send($)).drop).toBeUndefined()
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /breather to 09:26/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /rest for 27m/ })).toBeDefined()
     await ui.unmount()
     await clock.advance(GAP / 2 - 1_000)
     expect((await send($)).drop).toBeUndefined()
     expect(toasts.some(t => t.includes('Set due'))).toBe(false)
     await clock.advance(2_000)
     expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 20/100 by now.'))).toBe(true)
-    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
+    expect((await send($)).drop).toContain('10 pushups due now')
     await fit($, '10')
     expect((await send($)).drop).toBeUndefined()
   })
 
-  test('strict: less than a set, or clearing the debt, earns no breather', { options: { strict: true } }, async ($, on) => {
+  test('strict: less than the smallest button, or clearing the debt, earns no breather', { options: { strict: true } }, async ($, on) => {
     world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
     await start($)
-    await fit($, '5')
-    expect((await send($)).drop).toContain('Behind pace: 15 pushups')
-    await fit($, '15')
+    await fit($, '4')
+    expect((await send($)).drop).toContain('16 pushups due now')
+    await fit($, '16')
     expect((await send($)).drop).toBeUndefined()
-    expect((await fit($, '')).text).not.toContain('breather')
+    expect((await fit($, '')).text).not.toContain('rest for')
+  })
+
+  test('strict: a short set still earns a breather, the rest stays owed', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-05.swap`, '{"exercise":"squats","goal":500}\n']]))
+    await start($)
+    expect((await send($)).drop).toContain('Start the day with a set: 50 squats')
+    // 20 of a 50-rep set: short, but a real set.
+    expect((await fit($, '20')).text).toContain('30 due · rest for 27m')
+    expect((await send($)).drop).toBeUndefined()
   })
 
   test('strict: clearing the debt or resetting ends the breather, so the next set is not hidden', { options: { strict: true } }, async ($, on) => {
     const { clock, toasts } = world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - 2 * GAP + 60_000 } } })
     await start($)
-    expect((await fit($, '10')).text).toContain('breather to')
+    expect((await fit($, '10')).text).toContain('rest for')
     await fit($, '10')
     await clock.advance(61_000)
     expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 30/100 by now.'))).toBe(true)
-    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
-    expect((await fit($, '10')).text).not.toContain('breather')
+    expect((await send($)).drop).toContain('10 pushups due now')
+    expect((await fit($, '10')).text).not.toContain('rest for')
     await fit($, '10')
     expect((await send($)).drop).toBeUndefined()
     await fit($, 'reset')
-    expect((await send($)).drop).toContain('Behind pace: 30 pushups')
+    expect((await send($)).drop).toContain('30 pushups due now')
   })
 
   test('a breather is only for today', { options: { strict: true } }, async ($, on) => {
     world(on, new Map(), { store: { breather: { date: '2026-10-04', until: MONDAY_9AM + HOUR } } })
     await start($)
-    expect((await send($)).drop).toContain('Behind pace: 10 pushups')
+    expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
   })
 
   test('yesterday\'s start does not count today', { options: { strict: true } }, async ($, on) => {
     world(on, new Map(), { store: { dayStart: { date: '2026-10-04', at: MONDAY_9AM - 20 * HOUR } } })
     await start($)
-    expect((await send($)).drop).toContain('10/100 due by now')
+    expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
   })
 })
 
@@ -853,13 +960,13 @@ test('a 00:30 prompt never starts the day, so 9am is not a wall of overdue sets'
   await start($)
   expect((await send($)).drop).toBeUndefined()
   await clock.set(new Date(2026, 9, 5, 9, 0).getTime())
-  expect((await send($)).drop).toContain('(10/100 due by now)')
+  expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
 })
 
 test('the shell script catching you up is seen by the gate', { options: { strict: true } }, async ($, on) => {
   const { files } = world(on)
   await start($)
-  expect((await send($)).drop).toContain('Behind pace')
+  expect((await send($)).drop).toContain('Start the day with a set')
   files.set(`${LOG}/2026-10-05`, '10\n')
   expect((await send($)).drop).toBeUndefined()
 })
@@ -901,9 +1008,9 @@ describe('streaks and today', () => {
   test('the scoreboard marks today', async ($, on) => {
     world(on)
     await start($)
-    await fit($, 'score')
+    await fit($, 'streak')
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
-    expect(await ui.find({ type: 'Text', text: /10-05 .*◀ today/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /pushups  ◀ today/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▒ today/ })).toBeDefined()
     await ui.unmount()
   })
@@ -911,7 +1018,7 @@ describe('streaks and today', () => {
   test('the scoreboard opens closable with Esc, and Close closes it', async ($, on) => {
     const { open, calls } = world(on)
     await start($)
-    await fit($, 'score')
+    await fit($, 'streak')
     expect(open.has('gym-week')).toBe(true)
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
     await ui.press({ key: 'close' })

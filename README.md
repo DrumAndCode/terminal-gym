@@ -10,19 +10,19 @@ claude plugin marketplace add DrumAndCode/terminal-gym && claude plugin install 
 
 Start a new Claude Code session and the welcome band appears above your prompt.
 
-![The Terminal Gym band above the Claude Code prompt: 0/100 pushups, behind 10, with quick-log buttons](docs/band.png)
+![The Terminal Gym band above the Claude Code prompt: 0/100 pushups with a set due, with quick-log buttons](docs/band.png)
 
 ## Demo (40 seconds)
 https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 
 ## What you get
 
-- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set 10:53  log reps: [ +5 ] [ +10 ] [ +20 ]  🔥3d`. The buttons follow your set size: a 300-squat day shows +10 +20 +30. It's grey at 0, then red, yellow and green as you close in on the goal.
+- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set 10:53  log reps: [ +5 ] [ +10 ] [ +20 ]  🔥3d`. The buttons follow your set size: a 300-squat day shows +10 +20 +30. It's grey at 0, yellow once you start, and green as you close in on the goal.
 - **Walkthrough**: three steps on first run: what the mod does, pick your program, how streaks and the scoreboard work.
 - **Set reminders**: a toast when each set comes due.
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
 - **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
-- **Scoreboard** (`/fit score`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.
+- **Scoreboard** (`/fit streak`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.
 - **Streaks**: count every day you log any reps, for as long as you keep it going. A day with none, or a rest day, resets it. The grid still marks the days you hit the full goal.
 
 ## How a strict day works
@@ -31,13 +31,13 @@ Strict mode spreads today's goal into evenly spaced sets over a training window 
 
 | When | What happens |
 |---|---|
-| First prompt (say 9:00) | The day starts and the opening set is due. Your prompt waits: *"Behind pace: 10 pushups to catch up (10/100 due by now). /fit 10 to log."* |
+| First prompt (say 9:00) | The day starts and the opening set is due. Your prompt waits: *"Start the day with a set: 10 pushups. /fit 10 to log it, then send your prompt."* |
 | After `/fit 10` | You're through. The band reads `next set 09:53` |
 | 9:53 | Toast: *"⏱ Set due: 10 pushups. 20/100 by now."* Your next prompt waits until you log it |
 | …about every 53 minutes… | Ten sets in all, the last due 8 hours after your first prompt |
 | Goal done, or a rest day | Nothing waits |
 
-Fall more than a set behind and you don't have to pay it all back to back. Log one full set and you earn a breather of half the gap between sets (about 26 minutes with the defaults): prompts go through, the band reads `behind 10 · breather to 10:26`, and a toast calls the next set when it ends. Log less than a set and your prompts still wait.
+You don't have to pay a debt back all at once. Log a set, even a short one (at least the band's smallest button), and you earn a breather of half the gap between sets (about 26 minutes with the defaults): prompts go through, the band reads `10 due · rest for 27m`, and a toast calls the next set when it ends. What you didn't do stays owed. Log less than the smallest button and your prompts still wait.
 
 A held prompt goes back in the prompt box, so you can send it again once you've logged the set.
 
@@ -57,11 +57,12 @@ Easy mode (the default) shows the same schedule on the band and the same reminde
 | `/fit reset` | today back to 0 |
 | `/fit goal 60` | change today's goal (your routine stays as it is) |
 | `/fit window 3` | spread what's left of today over the next 3 hours (`/fit window off` to undo) |
+| `/fit window 1240` | spread what's left of today between now and 12:40 (24-hour clock, `12:40` works too) |
 | `/fit swap [exercise]` | switch today's exercise: the next in your program, or the one you name, with that exercise's goal |
 | `/fit rest` | rest day: no sets due, breaks your streak |
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
-| `/fit score` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
-| `/fit program` | pick your program (the walkthrough) |
+| `/fit streak` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
+| `/fit program` | pick your program (the walkthrough), or **Custom goals** to type each exercise's daily goal |
 | `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit rules` | house rules |
 | `/fit start` | replay the welcome |
