@@ -55,9 +55,13 @@ export type FitCommand =
   // null: back to the configured window from the first prompt.
   | { kind: 'window'; hours: number | null }
   | { kind: 'window-until'; hour: number; minute: number }
+  | { kind: 'later'; minutes: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]'
+// How long a set can be put off, and how often.
+export const LATER = { defaultMinutes: 30, maxMinutes: 60, perDay: 2 } as const
+
+const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | later [minutes] | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -103,6 +107,13 @@ export const parseFit = (args: string): FitCommand => {
     return hours > 0 && hours <= 24
       ? { kind: 'window', hours }
       : { kind: 'error', text: 'fit: window needs hours from now (up to 24) like /fit window 3, an end time like 1240, or off' }
+  }
+  if (head === 'later') {
+    // "30" or "30m": minutes from now, within the cap.
+    const minutes = value === undefined ? LATER.defaultMinutes : /^\d+m?$/.test(value) ? parseInt(value, 10) : NaN
+    return minutes > 0 && minutes <= LATER.maxMinutes
+      ? { kind: 'later', minutes }
+      : { kind: 'error', text: `fit: later takes minutes from now, up to ${LATER.maxMinutes}, like /fit later 30` }
   }
   if (/^-?\d+$/.test(head)) return { kind: 'add', n: Number(head) }
   return { kind: 'error', text: USAGE }
@@ -343,6 +354,7 @@ or press a **+** button above the prompt (sized to your set)
 | \`/fit reset\` | today back to 0 |
 | \`/fit goal 60\` | change today's goal |
 | \`/fit window 3\` | finish today in the next 3h |
+| \`/fit later 30\` | put the due set off 30 min (twice a day) |
 | \`/fit swap\` | switch today's exercise |
 | \`/fit rest\` | rest day, before any reps (breaks streak) |
 | \`/fit rest off\` | undo today's rest day |
@@ -362,6 +374,7 @@ Off by default. When it's on:
 - the first set is due right away
 - fall behind and your prompts wait until you catch up
 - log a set, even a short one, and you get a breather before the rest
+- just eaten? \`/fit later 30\` puts the due set off, once per set and twice a day
 - a toast tells you when each set comes due
 - \`/fit easy\` stops holding prompts; \`/fit rest\` (before any reps) takes the day off
 
