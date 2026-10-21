@@ -6,6 +6,7 @@ import {
   DEFAULT_ROUTINE,
   BARBELL,
   HELP,
+  LATER,
   MINI_BARBELL,
   ROUTINES,
   SIZES,
@@ -198,8 +199,9 @@ const refreshHistory = async ($: Engine) => {
 type Schedule = { from: number; ms: number; base: number }
 
 // The day's pace, kept in `<date>.day` beside its count so every session reads
-// the same one: when the day started, a `/fit window`, and a breather's end.
-type DayState = { start?: number; window?: Schedule; breather?: number }
+// the same one: when the day started, a `/fit window`, a breather's end, and
+// the `/fit later`s taken (how many today, and the due point the last put off).
+type DayState = { start?: number; window?: Schedule; breather?: number; laters?: number; putOff?: number }
 
 const dayPath = async ($: Engine, date: string) => `${(await files($)).log}/${date}.day`
 
@@ -213,6 +215,8 @@ const asDayState = (raw: unknown): DayState => {
     ...(typeof r.start === 'number' ? { start: r.start } : {}),
     ...(isSchedule(r.window) ? { window: r.window } : {}),
     ...(typeof r.breather === 'number' ? { breather: r.breather } : {}),
+    ...(typeof r.laters === 'number' ? { laters: r.laters } : {}),
+    ...(typeof r.putOff === 'number' ? { putOff: r.putOff } : {}),
   }
 }
 
@@ -285,6 +289,7 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
       required: left.required + s.base,
       // A breather still running: catch-up reps owed, but prompts not held.
       restUntil: day.breather !== undefined && day.breather > now ? day.breather : null,
+      isPutOff: day.putOff !== undefined && day.putOff === left.required + s.base,
       // A window set mid-day (base > 0) is never the day's opener, even after a reset.
       isOpening: s.base === 0 && t.count === 0 && left.behind > 0 && left.required <= left.setSize,
     }
@@ -332,6 +337,7 @@ const paceText = (p: Pace | null, isStrict: boolean, now: number) => {
   if (p === null) return ''
   if (p.isOpening === true) return `  🏁 first set: ${p.behind} to start the day`
   if (p.behind > 0 && p.restUntil !== null) {
+    if (p.isPutOff === true) return `  ${p.behind} due · back at ${clockTime(p.restUntil)}`
     return `  ${p.behind} due · rest for ${Math.max(1, Math.ceil((p.restUntil - now) / 60_000))}m`
   }
   if (p.behind > 0) return `  ${p.behind} due now${isStrict ? ' · log it to keep prompting' : ''}`
@@ -368,7 +374,8 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   const s = await schedule($, after.date)
   if (owed !== null && s !== undefined && stillOwed > 0 && added > 0 && added >= (repSteps(owed.setSize)[0] ?? owed.setSize)) {
     const until = (await $.clock.now()) + breatherMs(after.goal - s.base, owed.setSize, s.ms)
-    await writeDayState($, after.date, state => ({ ...state, breather: until }))
+    // Reps earned this breather, so it's no longer the set that was put off.
+    await writeDayState($, after.date, ({ putOff: _, ...state }) => ({ ...state, breather: until }))
   } else if (stillOwed <= 0 || added < 0) {
     await endBreather($, after.date)
   }
@@ -536,7 +543,7 @@ const boot = async ($: Engine) => {
   await $.command.register({
     name: 'fit',
     description: "Log reps toward today's goal",
-    argumentHint: '[n | set n | reset | goal n | window hours|hhmm|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]',
+    argumentHint: '[n | set n | reset | goal n | window hours|hhmm|off | later [minutes] | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]',
     immediate: true,
   })
 }
@@ -669,6 +676,33 @@ export const register: Register = (on, options) => {
           text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread between now and ${named}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
         }
       }
+      case 'later': {
+        // A breather with no reps logged: the set stays owed, prompts go through
+        // until the time is up. Once per due set and twice a day, so strict stays strict.
+        const p = await refreshPace($)
+        const t = await read($, today)
+        if (t === null || t.isRest) return { text: "Today's a rest day. Nothing to put off." }
+        if (t.goal > 0 && t.count >= t.goal) return { text: `Today's goal is done. ${line(t)}` }
+        if (p === null) return { text: 'Nothing is due yet. The day starts with your first prompt.' }
+        if (p.behind <= 0) {
+          return { text: p.nextDueAt === null ? 'Nothing is due.' : `Nothing is due until ${clockTime(p.nextDueAt)}. Put it off then.` }
+        }
+        if (p.restUntil !== null) {
+          return { text: `Already ${p.isPutOff === true ? 'put off' : 'resting'} until ${clockTime(p.restUntil)}. Log a set, even a short one, when it ends.` }
+        }
+        const day = await readDayState($, t.date)
+        if (day.putOff === p.required) {
+          return { text: `This set was already put off once. Log it, even a short one (/fit ${repSteps(p.setSize)[0] ?? p.setSize} earns a breather).` }
+        }
+        if ((day.laters ?? 0) >= LATER.perDay) {
+          return { text: `That's ${LATER.perDay} put off today already. Log a set, even a short one, or /fit easy stops holding prompts.` }
+        }
+        const until = (await $.clock.now()) + cmd.minutes * 60_000
+        await writeDayState($, t.date, s => ({ ...s, breather: until, laters: (s.laters ?? 0) + 1, putOff: p.required }))
+        return {
+          text: `${p.behind} ${t.exercise} put off until ${clockTime(until)}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
+        }
+      }
       case 'program':
         await openOnboarding($)
         return { text: 'Pick your program.' }
@@ -728,7 +762,7 @@ export const register: Register = (on, options) => {
         }
       }
       return {
-        drop: `${p.behind} ${t?.exercise ?? 'reps'} due now (${p.required}/${t?.goal ?? 0} by now). /fit ${p.behind} to log it, then send your prompt. /fit easy stops holding prompts.`,
+        drop: `${p.behind} ${t?.exercise ?? 'reps'} due now (${p.required}/${t?.goal ?? 0} by now). /fit ${p.behind} to log it, then send your prompt. /fit later 30 puts it off; /fit easy stops holding prompts.`,
       }
     }
     return next(e)

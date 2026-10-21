@@ -41,6 +41,8 @@ You don't have to pay a debt back all at once. Log a set, even a short one (at l
 
 A held prompt goes back in the prompt box, so you can send it again once you've logged the set.
 
+Just eaten, or mid-call? `/fit later 30` puts the due set off for 30 minutes (up to 60) without logging anything: prompts go through, the band reads `20 due · back at 13:05`, and a toast calls the set when time is up. Each due set can be put off once, and twice a day in all; after that it's a set, even a short one, or `/fit easy`.
+
 Know you only have a few hours today? `/fit window 3` spreads the reps you still owe over the next 3 hours, starting now. A window ends by midnight, because the day's log does. The first of those sets is due straight away. `/fit window off` goes back to the default window. `/fit goal 60` changes today's goal and leaves your routine alone.
 
 Only prompts you type can be held. Background tasks, `/loop` runs, messages from other sessions and slash commands like `/fit 10` always go through. Prompts before 5am count as the night before, so a late night never leaves you a wall of overdue sets in the morning.
@@ -62,6 +64,7 @@ Every Claude Code session reads the same log in `~/.claude/fitness`, so a set yo
 | `/fit goal 60` | change today's goal (your routine stays as it is) |
 | `/fit window 3` | spread what's left of today over the next 3 hours (`/fit window off` to undo) |
 | `/fit window 1240` | spread what's left of today between now and 12:40 (24-hour clock, `12:40` works too) |
+| `/fit later 30` | put the due set off 30 minutes (up to 60): prompts go through, the set stays owed. Once per set, twice a day |
 | `/fit swap [exercise]` | switch today's exercise: the next in your program, or the one you name, with that exercise's goal |
 | `/fit rest` | rest day: no sets due, breaks your streak. Only before you've logged reps that day |
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
@@ -96,7 +99,7 @@ The mod makes no network calls and adds no hidden context for the model. `/fit` 
 - `log/YYYY-MM-DD`: that day's count.
 - `log/YYYY-MM-DD.skip`: a rest day. If it contains `off`, the rest day was undone.
 - `log/YYYY-MM-DD.swap`: that day's plan after `/fit swap` or `/fit goal`, in the same shape as a routine day.
-- `log/YYYY-MM-DD.day`: that day's pace, for example `{ "start": 1760000000000, "window": { "from": …, "ms": …, "base": 0 }, "breather": … }`: when the day started (your first prompt), a `/fit window`, and when a breather ends, as milliseconds since the epoch.
+- `log/YYYY-MM-DD.day`: that day's pace, for example `{ "start": 1760000000000, "window": { "from": …, "ms": …, "base": 0 }, "breather": …, "laters": 1, "putOff": 20 }`: when the day started (your first prompt), a `/fit window`, when a breather ends (milliseconds since the epoch), and the `/fit later`s taken: how many today, and the due point the last one put off.
 
 ## What it does inside Claude Code
 

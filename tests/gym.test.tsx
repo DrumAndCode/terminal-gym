@@ -135,6 +135,11 @@ describe('lib', () => {
     expect(parseFit('window 100')).toEqual({ kind: 'window-until', hour: 1, minute: 0 })
     expect(parseFit('window 12')).toEqual({ kind: 'window', hours: 12 })
     expect(parseFit('easy')).toEqual({ kind: 'strict', isOn: false })
+    expect(parseFit('later')).toEqual({ kind: 'later', minutes: 30 })
+    expect(parseFit('later 45')).toEqual({ kind: 'later', minutes: 45 })
+    expect(parseFit('later 20m')).toEqual({ kind: 'later', minutes: 20 })
+    expect(parseFit('later 90').kind).toBe('error')
+    expect(parseFit('later 0').kind).toBe('error')
     expect(parseFit('reset')).toEqual({ kind: 'reset' })
     expect(parseFit('rest')).toEqual({ kind: 'skip' })
     expect(parseFit('rest off')).toEqual({ kind: 'unskip' })
@@ -1065,6 +1070,42 @@ describe('pace', () => {
     world(on, new Map([[`${LOG}/2026-10-04.day`, day({ start: MONDAY_9AM - 20 * HOUR })]]))
     await start($)
     expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
+  })
+
+  test('strict: /fit later puts the due set off, once per set and twice a day', { options: { strict: true } }, async ($, on) => {
+    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
+    await start($)
+    expect((await send($)).drop).toContain('/fit later 30 puts it off')
+    expect((await fit($, 'later')).text).toContain('20 pushups put off until 09:30. 💪')
+    // Prompts go through; the band says when the set is back; nothing is logged.
+    expect((await send($)).drop).toBeUndefined()
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /0\/100 pushups  20 due · back at 09:30/ })).toBeDefined()
+    await ui.unmount()
+    // The same set can't be put off again, now or after the time is up.
+    expect((await fit($, 'later 10')).text).toContain('Already put off until 09:30')
+    await clock.advance(30 * 60_000 + 1_000)
+    expect(toasts.some(t => t.includes('⏱ Set due: 20 pushups'))).toBe(true)
+    expect((await send($)).drop).toContain('20 pushups due now')
+    expect((await fit($, 'later')).text).toContain('already put off once')
+    // A short set earns its breather as before; the next set due can be put off once more.
+    expect((await fit($, '5')).text).toContain('rest for')
+    await clock.advance(GAP)
+    expect((await send($)).drop).toContain('pushups due now')
+    expect((await fit($, 'later 15')).text).toContain('put off until')
+    expect((await send($)).drop).toBeUndefined()
+    // Twice a day is the limit.
+    await clock.advance(15 * 60_000 + GAP)
+    expect((await send($)).drop).toContain('pushups due now')
+    expect((await fit($, 'later')).text).toContain("That's 2 put off today already")
+  })
+
+  test('/fit later needs a set that is due', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-05`, '10\n'], [`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - 60_000 })]]))
+    await start($)
+    expect((await fit($, 'later')).text).toContain('Nothing is due until')
+    await fit($, 'set 100')
+    expect((await fit($, 'later')).text).toContain("Today's goal is done")
   })
 
   test('strict: a breather earned in another session holds nothing here', { options: { strict: true } }, async ($, on) => {

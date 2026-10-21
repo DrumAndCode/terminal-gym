@@ -35,6 +35,8 @@ export type Pace = {
   restUntil: number | null
   // The day's first set, before any reps: an opener, not a debt.
   isOpening?: boolean
+  // The breather is a `/fit later`: the set was put off, not partly done.
+  isPutOff?: boolean
 }
 
 declare module 'claude-code' {
