@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 
 ## What you get
 
-- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set 10:53  log reps: [ +5 ] [ +10 ] [ +25 ]  🔥3d`. It's grey at 0, then red, yellow and green as you close in on the goal.
+- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set 10:53  log reps: [ +5 ] [ +10 ] [ +20 ]  🔥3d`. The buttons follow your set size: a 300-squat day shows +10 +20 +30. It's grey at 0, then red, yellow and green as you close in on the goal.
 - **Walkthrough**: three steps on first run: what the mod does, pick your program, how streaks and the scoreboard work.
 - **Set reminders**: a toast when each set comes due.
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.

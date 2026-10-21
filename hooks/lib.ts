@@ -229,6 +229,15 @@ export const setSizeFor = (goal: number, setting: number) => {
   return Math.min(goal, Math.max(5, Math.round(goal / 10 / 5) * 5))
 }
 
+// The band's quick-log buttons: a third, two thirds and a whole set, in fives
+// (tens from a 60-rep set). A set too small for three steps gets half, one and two.
+export const repSteps = (setSize: number) => {
+  if (setSize <= 0) return [5, 10, 25]
+  const step = setSize >= 60 ? 10 : 5
+  const thirds = [1, 2, 3].map(i => Math.round((setSize * i) / 3 / step) * step)
+  return (thirds[0] ?? 0) > 0 && new Set(thirds).size === 3 ? thirds : [Math.ceil(setSize / 2), setSize, setSize * 2]
+}
+
 // The goal as evenly spaced sets: the first due at the start, the last at the
 // end of the window. `required` is what should be done by `now`.
 const setGap = (goal: number, setSize: number, windowMs: number) => {
@@ -278,7 +287,7 @@ When a turn runs long, drop and do a set.
 
 ### Log a set
 \`/fit 20\` adds 20 reps
-or press **+5 / +10 / +25** above the prompt
+or press a **+** button above the prompt (sized to your set)
 
 ### Commands
 | Command | Does |

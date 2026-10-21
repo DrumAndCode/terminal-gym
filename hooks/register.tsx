@@ -25,6 +25,7 @@ import {
   parseFit,
   pickSwap,
   progressColor,
+  repSteps,
   scale,
   streak,
   weekdayKey,
@@ -651,7 +652,9 @@ export const register: Register = (on, options) => {
     const run = fullStreak(days, await read($, olderStreak))
     const streakText = run > 0 ? `  🔥${run}d` : ''
     const LOG_LABEL = 'log reps: '
-    const logWidth = cells(LOG_LABEL) + buttonsWidth(['+5', '+10', '+25']) + cells(streakText)
+    // Buttons sized to today's set: a 300 goal's 30-rep sets get +10 +20 +30.
+    const steps = repSteps(setSizeFor(t.goal, paceConfig.setSize))
+    const logWidth = cells(LOG_LABEL) + buttonsWidth(steps.map(n => `+${n}`)) + cells(streakText)
 
     return (
       <Box key="tracker" flexDirection={cols >= cells(progress) + 2 + logWidth ? 'row' : 'column'}>
@@ -661,11 +664,12 @@ export const register: Register = (on, options) => {
         </Text>
         <Box>
           <Text dimColor>{LOG_LABEL}</Text>
-          <Button key="add5" label="+5" onPress={add(5)} />
-          <Text> </Text>
-          <Button key="add10" label="+10" onPress={add(10)} />
-          <Text> </Text>
-          <Button key="add25" label="+25" onPress={add(25)} />
+          {steps.map((n, i) => (
+            <Box key={`step${i}`}>
+              {i > 0 && <Text> </Text>}
+              <Button key={`add${n}`} label={`+${n}`} onPress={add(n)} />
+            </Box>
+          ))}
           {streakText !== '' && <Text>{streakText}</Text>}
         </Box>
       </Box>
@@ -796,7 +800,7 @@ export const register: Register = (on, options) => {
           <Text> </Text>
           <Text>Log reps two ways:</Text>
           <Text dimColor>  type /fit 20</Text>
-          <Text dimColor>  or press +5 +10 +25 above your prompt</Text>
+          <Text dimColor>  or press a + button above your prompt</Text>
           <Text> </Text>
           {nav}
         </Box>

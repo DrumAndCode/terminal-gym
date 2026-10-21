@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, cells, paceAt, parseCustom, parseFit, pickSwap, progressColor, scale, setSizeFor, streak } from '../hooks/lib'
+import { buttonsWidth, cells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -217,8 +217,8 @@ describe('drawing', () => {
       const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...BAND })
       expect(await ui.find({ type: 'Text', text: `${total}/100 pushups` })).toBeDefined()
       await ui.press({ key: 'add10' })
-      await ui.press({ key: 'add25' })
-      total += 35
+      await ui.press({ key: 'add20' })
+      total += 30
       expect(files.get(`${LOG}/2026-10-05`)).toBe(`${total}\n`)
       expect(await ui.find({ type: 'Text', text: `${total}/100 pushups` })).toBeDefined()
       await ui.unmount()
@@ -473,6 +473,25 @@ test('the bands stack instead of squeezing on narrow terminals', async ($, on) =
 test('band widths follow the labels', async () => {
   expect(buttonsWidth(['Pick your training', 'House rules', 'Just train'])).toBe(53)
   expect(buttonsWidth(['+5', '+10', '+25'])).toBe(22)
+})
+
+test('rep buttons scale with the set', async () => {
+  expect(repSteps(30)).toEqual([10, 20, 30])
+  expect(repSteps(15)).toEqual([5, 10, 15])
+  expect(repSteps(10)).toEqual([5, 10, 20])
+  expect(repSteps(5)).toEqual([3, 5, 10])
+  expect(repSteps(60)).toEqual([20, 40, 60])
+  expect(repSteps(0)).toEqual([5, 10, 25])
+})
+
+test('a 300 goal gets +10 +20 +30', async ($, on) => {
+  const { files } = world(on, new Map([[`${LOG}/2026-10-05.swap`, '{"exercise":"squats","goal":300}\n']]))
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+  expect(await ui.find({ key: 'add5' })).toBeUndefined()
+  await ui.press({ key: 'add30' })
+  expect(files.get(`${LOG}/2026-10-05`)).toBe('30\n')
+  await ui.unmount()
   expect(cells('✅ 💪 🔥')).toBe(8)
 })
 
