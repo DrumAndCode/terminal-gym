@@ -398,7 +398,8 @@ export const register: Register = (on, options) => {
   const isStrict = options.strict === true
   const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
   const nudgeReps = Number(options.nudgeReps ?? 10)
-  paceConfig.setSize = Number(options.setSize ?? 0)
+  // Whole reps only: a fractional set would make fractional buttons.
+  paceConfig.setSize = Math.max(0, Math.round(Number(options.setSize ?? 0)) || 0)
   paceConfig.windowMs = Math.max(1, Number(options.windowHours ?? 8)) * HOUR_MS
   let timer: { cancel: () => void } | undefined
 

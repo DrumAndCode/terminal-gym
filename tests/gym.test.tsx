@@ -473,14 +473,20 @@ test('the bands stack instead of squeezing on narrow terminals', async ($, on) =
 test('band widths follow the labels', async () => {
   expect(buttonsWidth(['Pick your training', 'House rules', 'Just train'])).toBe(53)
   expect(buttonsWidth(['+5', '+10', '+25'])).toBe(22)
+  expect(cells('✅ 💪 🔥')).toBe(8)
 })
 
-test('rep buttons scale with the set', async () => {
+test('rep buttons scale with the set, the last one the set exactly', async () => {
   expect(repSteps(30)).toEqual([10, 20, 30])
   expect(repSteps(15)).toEqual([5, 10, 15])
   expect(repSteps(10)).toEqual([5, 10, 20])
   expect(repSteps(5)).toEqual([3, 5, 10])
   expect(repSteps(60)).toEqual([20, 40, 60])
+  expect(repSteps(65)).toEqual([20, 40, 65])
+  expect(repSteps(13)).toEqual([5, 10, 13])
+  expect(repSteps(2)).toEqual([1, 2, 4])
+  // Never two buttons with the same key.
+  expect(repSteps(1)).toEqual([1, 2])
   expect(repSteps(0)).toEqual([5, 10, 25])
 })
 
@@ -492,7 +498,6 @@ test('a 300 goal gets +10 +20 +30', async ($, on) => {
   await ui.press({ key: 'add30' })
   expect(files.get(`${LOG}/2026-10-05`)).toBe('30\n')
   await ui.unmount()
-  expect(cells('✅ 💪 🔥')).toBe(8)
 })
 
 test('the welcome band changes layout with width', async ($, on) => {

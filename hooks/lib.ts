@@ -230,12 +230,14 @@ export const setSizeFor = (goal: number, setting: number) => {
 }
 
 // The band's quick-log buttons: a third, two thirds and a whole set, in fives
-// (tens from a 60-rep set). A set too small for three steps gets half, one and two.
+// (tens from a 60-rep set); the last is the set exactly. A set too small for
+// three steps gets half, one and two, without repeats.
 export const repSteps = (setSize: number) => {
   if (setSize <= 0) return [5, 10, 25]
   const step = setSize >= 60 ? 10 : 5
-  const thirds = [1, 2, 3].map(i => Math.round((setSize * i) / 3 / step) * step)
-  return (thirds[0] ?? 0) > 0 && new Set(thirds).size === 3 ? thirds : [Math.ceil(setSize / 2), setSize, setSize * 2]
+  const [third, twoThirds] = [1, 2].map(i => Math.round((setSize * i) / 3 / step) * step) as [number, number]
+  if (third > 0 && third < twoThirds && twoThirds < setSize) return [third, twoThirds, setSize]
+  return [...new Set([Math.ceil(setSize / 2), setSize, setSize * 2])]
 }
 
 // The goal as evenly spaced sets: the first due at the start, the last at the
