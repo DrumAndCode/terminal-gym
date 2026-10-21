@@ -25,6 +25,7 @@ import {
   parseFit,
   pickSwap,
   progressColor,
+  repSteps,
   scale,
   streak,
   weekdayKey,
@@ -397,7 +398,8 @@ export const register: Register = (on, options) => {
   const isStrict = options.strict === true
   const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
   const nudgeReps = Number(options.nudgeReps ?? 10)
-  paceConfig.setSize = Number(options.setSize ?? 0)
+  // Whole reps only: a fractional set would make fractional buttons.
+  paceConfig.setSize = Math.max(0, Math.round(Number(options.setSize ?? 0)) || 0)
   paceConfig.windowMs = Math.max(1, Number(options.windowHours ?? 8)) * HOUR_MS
   let timer: { cancel: () => void } | undefined
 
@@ -543,8 +545,9 @@ export const register: Register = (on, options) => {
     await startDay($)
     const p = await refreshPace($)
     const t = await read($, today)
+    // Claude Code puts a dropped prompt back in the box itself; a fill here
+    // as well left it there twice.
     if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
-      void $.prompt.fill({ text: e.text })
       return {
         drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
       }
@@ -650,7 +653,9 @@ export const register: Register = (on, options) => {
     const run = fullStreak(days, await read($, olderStreak))
     const streakText = run > 0 ? `  🔥${run}d` : ''
     const LOG_LABEL = 'log reps: '
-    const logWidth = cells(LOG_LABEL) + buttonsWidth(['+5', '+10', '+25']) + cells(streakText)
+    // Buttons sized to today's set: a 300 goal's 30-rep sets get +10 +20 +30.
+    const steps = repSteps(setSizeFor(t.goal, paceConfig.setSize))
+    const logWidth = cells(LOG_LABEL) + buttonsWidth(steps.map(n => `+${n}`)) + cells(streakText)
 
     return (
       <Box key="tracker" flexDirection={cols >= cells(progress) + 2 + logWidth ? 'row' : 'column'}>
@@ -660,11 +665,12 @@ export const register: Register = (on, options) => {
         </Text>
         <Box>
           <Text dimColor>{LOG_LABEL}</Text>
-          <Button key="add5" label="+5" onPress={add(5)} />
-          <Text> </Text>
-          <Button key="add10" label="+10" onPress={add(10)} />
-          <Text> </Text>
-          <Button key="add25" label="+25" onPress={add(25)} />
+          {steps.map((n, i) => (
+            <Box key={`step${i}`}>
+              {i > 0 && <Text> </Text>}
+              <Button key={`add${n}`} label={`+${n}`} onPress={add(n)} />
+            </Box>
+          ))}
           {streakText !== '' && <Text>{streakText}</Text>}
         </Box>
       </Box>
@@ -795,7 +801,7 @@ export const register: Register = (on, options) => {
           <Text> </Text>
           <Text>Log reps two ways:</Text>
           <Text dimColor>  type /fit 20</Text>
-          <Text dimColor>  or press +5 +10 +25 above your prompt</Text>
+          <Text dimColor>  or press a + button above your prompt</Text>
           <Text> </Text>
           {nav}
         </Box>
