@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, cells, heatCells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak } from '../hooks/lib'
+import { buttonsWidth, cells, customRoutine, heatCells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -103,6 +103,9 @@ describe('lib', () => {
     expect(parseFit('window 940')).toEqual({ kind: 'window-until', hour: 9, minute: 40 })
     expect(parseFit('window 3')).toEqual({ kind: 'window', hours: 3 })
     expect(parseFit('window 2560').kind).toBe('error')
+    expect(parseFit('window 0930')).toEqual({ kind: 'window-until', hour: 9, minute: 30 })
+    expect(parseFit('window 100')).toEqual({ kind: 'window-until', hour: 1, minute: 0 })
+    expect(parseFit('window 12')).toEqual({ kind: 'window', hours: 12 })
     expect(parseFit('easy')).toEqual({ kind: 'strict', isOn: false })
     expect(parseFit('reset')).toEqual({ kind: 'reset' })
     expect(parseFit('rest')).toEqual({ kind: 'skip' })
@@ -430,6 +433,25 @@ describe('walkthrough', () => {
     // A day already swapped keeps its own plan, and today takes the new one.
     expect(JSON.parse(files.get(`${LOG}/2026-10-03.swap`) ?? '{}')).toEqual({ exercise: 'burpees', goal: 20 })
     expect(files.has(`${LOG}/2026-10-05.swap`)).toBe(false)
+  })
+
+  test('custom goals left as filled keep days that differ', async () => {
+    const base = { mon: { exercise: 'pushups', goal: 100 }, thu: { exercise: 'pushups', goal: 50 }, tue: { exercise: 'dips', goal: 80 } }
+    expect(customRoutine(base, { pushups: '100', dips: '80' })).toEqual(base)
+    expect(customRoutine(base, { pushups: '120', dips: '80' })?.thu?.goal).toBe(120)
+    expect(customRoutine(base, { pushups: '', dips: '80' })).toBeUndefined()
+  })
+
+  test('re-picking the same program writes no history', async ($, on) => {
+    const { files } = world(on)
+    await start($)
+    await fit($, 'program')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...ONBOARD })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'finish' })
+    await ui.unmount()
+    expect([...files.keys()].some(path => path.endsWith('.swap'))).toBe(false)
   })
 
   test('/fit reset puts today back to zero', async ($, on) => {
@@ -816,6 +838,23 @@ describe('pace', () => {
     await start($)
     expect((await fit($, 'window 1240')).text).toContain('100 pushups left, spread between now and 12:40')
     expect((await fit($, 'window 0830')).text).toContain('08:30 has already passed today')
+  })
+
+  test('strict: a mid-day hold points to /fit easy, never a refused /fit rest', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-05`, '10\n']]), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
+    await start($)
+    const held = (await send($)).drop ?? ''
+    expect(held).toContain('10 pushups due now')
+    expect(held).toContain('/fit easy')
+    expect(held).not.toContain('/fit rest')
+  })
+
+  test('a reset under a mid-day window is not the day\'s opener', { options: { strict: true } }, async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-10-05`, '30\n']]))
+    await start($)
+    await fit($, 'window 3')
+    await fit($, 'reset')
+    expect((await send($)).drop).not.toContain('Start the day')
   })
 
   test('a window is only for today', { options: { strict: true } }, async ($, on) => {

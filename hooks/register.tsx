@@ -50,6 +50,8 @@ const toast = ($: Engine, text: string) => $.ui.toast(text, { timeoutMs: TOAST_M
 // The pace settings, set from the options each time the module registers.
 const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
 let dueTimer: { cancel: () => void } | undefined
+// Redraws the band each minute of a breather, so "rest for 13m" counts down.
+let restTicker: { cancel: () => void } | undefined
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
 const olderStreak = atom({ plugin: 'terminal-gym', key: 'olderStreak' } as const, 0)
@@ -238,10 +240,23 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
       ...left,
       required: left.required + s.base,
       restUntil: (await breatherEnd($, t.date, now)) ?? null,
-      isOpening: t.count === 0 && left.behind > 0 && left.required <= left.setSize,
+      // A window set mid-day (base > 0) is never the day's opener, even after a reset.
+      isOpening: s.base === 0 && t.count === 0 && left.behind > 0 && left.required <= left.setSize,
     }
   }
   await update($, pace, () => next)
+  restTicker?.cancel()
+  restTicker = undefined
+  const restUntil = next?.restUntil ?? null
+  if (restUntil !== null) {
+    const tick = () => {
+      restTicker = $.clock.after(60_000, async () => {
+        $.ui.invalidate('ui.render')
+        if ((await $.clock.now()) < restUntil) tick()
+      })
+    }
+    tick()
+  }
   const wakeAt = Math.min(next?.nextDueAt ?? Infinity, next?.restUntil ?? Infinity)
   if (wakeAt !== Infinity && t !== null && t.count < t.goal) {
     dueTimer = $.clock.after(Math.max(1, wakeAt - now), () => void setDue($))
@@ -405,7 +420,8 @@ const finishOnboarding = async ($: Engine) => {
     return
   }
   if (routine !== undefined) {
-    await freezePastDays($, await loadRoutine($, routinePath))
+    const old = await loadRoutine($, routinePath)
+    if (JSON.stringify(old) !== JSON.stringify(routine)) await freezePastDays($, old)
     if (p.hasRoutine) await $.fs.write(`${routinePath}.bak`, await $.fs.read(routinePath))
     await $.fs.write(routinePath, `${JSON.stringify(routine, null, 2)}\n`)
   }
@@ -565,7 +581,7 @@ export const register: Register = (on, options) => {
         const d = new Date(now)
         const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), cmd.hour, cmd.minute).getTime()
         const named = `${String(cmd.hour).padStart(2, '0')}:${String(cmd.minute).padStart(2, '0')}`
-        if (end <= now) return { text: `${named} has already passed today. Pick a later time, or /fit window 2 for the next 2 hours.` }
+        if (end <= now) return { text: `${named} has already passed today. 3–4 digits are a clock time (1240 = 12:40); for hours from now, use 1–2 digits like /fit window 2.` }
         // The same window `/fit window <hours>` sets, ending at the time named.
         await $.store.delete('breather')
         await $.store.set('window', { date: t.date, from: now, ms: end - now, base: t.count })
@@ -624,7 +640,7 @@ export const register: Register = (on, options) => {
         }
       }
       return {
-        drop: `${p.behind} ${t?.exercise ?? 'reps'} due now (${p.required}/${t?.goal ?? 0} by now). /fit ${p.behind} to log it, then send your prompt. /fit rest skips the day (breaks streak).`,
+        drop: `${p.behind} ${t?.exercise ?? 'reps'} due now (${p.required}/${t?.goal ?? 0} by now). /fit ${p.behind} to log it, then send your prompt. /fit easy stops holding prompts.`,
       }
     }
     return next(e)

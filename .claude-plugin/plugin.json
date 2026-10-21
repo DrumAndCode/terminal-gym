@@ -30,7 +30,7 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Spread today's goal into sets from your first prompt; fall behind and prompts wait until you catch up (/fit rest breaks your streak instead).",
+      "description": "Spread today's goal into sets from your first prompt; fall behind and prompts wait until you catch up (/fit easy turns holding off).",
       "default": false
     },
     "windowHours": {

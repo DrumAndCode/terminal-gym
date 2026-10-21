@@ -59,7 +59,7 @@ Easy mode (the default) shows the same schedule on the band and the same reminde
 | `/fit window 3` | spread what's left of today over the next 3 hours (`/fit window off` to undo) |
 | `/fit window 1240` | spread what's left of today between now and 12:40 (24-hour clock, `12:40` works too) |
 | `/fit swap [exercise]` | switch today's exercise: the next in your program, or the one you name, with that exercise's goal |
-| `/fit rest` | rest day: no sets due, breaks your streak |
+| `/fit rest` | rest day: no sets due, breaks your streak. Only before you've logged reps that day |
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
 | `/fit streak` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
 | `/fit program` | pick your program (the walkthrough), or **Custom goals** to type each exercise's daily goal |

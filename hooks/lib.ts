@@ -212,13 +212,14 @@ export const exerciseGoals = (routine: Routine) => {
 }
 
 // A custom program: the base routine's days, each exercise at the goal typed
-// for it. Undefined while any goal isn't a whole number above zero.
+// for it. A field left at its prefill changes nothing, so days that differ keep
+// their own goals. Undefined while any goal isn't a whole number above zero.
 export const customRoutine = (base: Routine, goals: Record<string, string>): Routine | undefined => {
   const parsed = new Map<string, number>()
-  for (const exercise of Object.keys(exerciseGoals(base))) {
+  for (const [exercise, prefill] of Object.entries(exerciseGoals(base))) {
     const text = (goals[exercise] ?? '').trim()
     if (!/^\d+$/.test(text) || Number(text) <= 0) return undefined
-    parsed.set(exercise, Number(text))
+    if (Number(text) !== prefill) parsed.set(exercise, Number(text))
   }
   return Object.fromEntries(
     Object.entries(base).map(([day, plan]) => [day, { ...plan, goal: parsed.get(plan.exercise) ?? plan.goal }]),
@@ -341,7 +342,7 @@ or press a **+** button above the prompt (sized to your set)
 | \`/fit goal 60\` | change today's goal |
 | \`/fit window 3\` | finish today in the next 3h |
 | \`/fit swap\` | switch today's exercise |
-| \`/fit rest\` | rest day (breaks streak) |
+| \`/fit rest\` | rest day, before any reps (breaks streak) |
 | \`/fit rest off\` | undo today's rest day |
 | \`/fit streak\` | streak + grid |
 | \`/fit program\` | pick your training |
@@ -359,7 +360,7 @@ Off by default. When it's on:
 - fall behind and your prompts wait until you catch up
 - log a set, even a short one, and you get a breather before the rest
 - a toast tells you when each set comes due
-- \`/fit rest\` bails, but costs your streak
+- \`/fit easy\` stops holding prompts; \`/fit rest\` (before any reps) takes the day off
 
 **Turn it on:** type \`/fit strict\`
 **Turn it off:** type \`/fit easy\`
