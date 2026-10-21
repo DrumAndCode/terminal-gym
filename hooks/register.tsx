@@ -195,11 +195,56 @@ const refreshHistory = async ($: Engine) => {
   return days
 }
 
-// The day starts at the person's first prompt; sets are spread from there.
-const dayStart = async ($: Engine, date: string) => {
-  const stored = (await $.store.get('dayStart')) as { date?: string; at?: number } | undefined
-  return stored?.date === date && typeof stored.at === 'number' ? stored.at : undefined
+type Schedule = { from: number; ms: number; base: number }
+
+// The day's pace, kept in `<date>.day` beside its count so every session reads
+// the same one: when the day started, a `/fit window`, and a breather's end.
+type DayState = { start?: number; window?: Schedule; breather?: number }
+
+const dayPath = async ($: Engine, date: string) => `${(await files($)).log}/${date}.day`
+
+const isSchedule = (w: unknown): w is Schedule =>
+  typeof w === 'object' && w !== null && ['from', 'ms', 'base'].every(k => typeof (w as Record<string, unknown>)[k] === 'number')
+
+// Only the fields of the right shape: a damaged file reads as an empty day.
+const asDayState = (raw: unknown): DayState => {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  return {
+    ...(typeof r.start === 'number' ? { start: r.start } : {}),
+    ...(isSchedule(r.window) ? { window: r.window } : {}),
+    ...(typeof r.breather === 'number' ? { breather: r.breather } : {}),
+  }
 }
+
+// Up to 0.1.4 these sat in the plugin store, which a session may cache. A day
+// started before the update still reads from there until its file is written.
+const legacyDayState = async ($: Engine, date: string): Promise<DayState> => {
+  const dated = (key: string) => $.store.get(key) as Promise<{ date?: string; [k: string]: unknown } | undefined>
+  const [start, window, breather] = await Promise.all([dated('dayStart'), dated('window'), dated('breather')])
+  return asDayState({
+    start: start?.date === date ? start.at : undefined,
+    window: window?.date === date ? { from: window.from, ms: window.ms, base: window.base } : undefined,
+    breather: breather?.date === date ? breather.until : undefined,
+  })
+}
+
+const readDayState = async ($: Engine, date: string): Promise<DayState> => {
+  const path = await dayPath($, date)
+  if (!(await $.fs.exists(path))) return legacyDayState($, date)
+  try {
+    return asDayState(JSON.parse(await $.fs.read(path)))
+  } catch {
+    return {}
+  }
+}
+
+const writeDayState = async ($: Engine, date: string, change: (state: DayState) => DayState) => {
+  const next = change(await readDayState($, date))
+  await $.fs.write(await dayPath($, date), `${JSON.stringify(next)}\n`)
+}
+
+// The day starts at the person's first prompt; sets are spread from there.
+const dayStart = async ($: Engine, date: string) => (await readDayState($, date)).start
 
 // Prompts before this hour belong to the night before: they never start the
 // day, or a 00:30 prompt would leave every set overdue by morning.
@@ -209,27 +254,19 @@ const startDay = async ($: Engine) => {
   const now = await $.clock.now()
   if (new Date(now).getHours() < DAY_BEGINS_HOUR) return
   const date = dayKey(now)
-  if ((await dayStart($, date)) === undefined) await $.store.set('dayStart', { date, at: now })
+  if ((await dayStart($, date)) === undefined) await writeDayState($, date, s => ({ ...s, start: now }))
 }
 
-// A breather still running today, or undefined.
-const breatherEnd = async ($: Engine, date: string, now: number) => {
-  const stored = (await $.store.get('breather')) as { date?: string; until?: number } | undefined
-  return stored?.date === date && typeof stored.until === 'number' && stored.until > now ? stored.until : undefined
-}
-
-type Schedule = { from: number; ms: number; base: number }
+const endBreather = ($: Engine, date: string) => writeDayState($, date, ({ breather: _, ...rest }) => rest)
 
 // The span today's sets are spread over: the configured window from the first
 // prompt, or after `/fit window`, the reps left then (above `base`) over the hours named.
-const schedule = async ($: Engine, date: string): Promise<Schedule | undefined> => {
-  const set = (await $.store.get('window')) as Partial<Schedule> & { date?: string } | undefined
-  if (set?.date === date && typeof set.from === 'number' && typeof set.ms === 'number' && typeof set.base === 'number') {
-    return { from: set.from, ms: set.ms, base: set.base }
-  }
-  const at = await dayStart($, date)
-  return at === undefined ? undefined : { from: at, ms: paceConfig.windowMs, base: 0 }
+const scheduleOf = ({ window, start }: DayState): Schedule | undefined => {
+  if (window !== undefined) return window
+  return start === undefined ? undefined : { from: start, ms: paceConfig.windowMs, base: 0 }
 }
+
+const schedule = async ($: Engine, date: string) => scheduleOf(await readDayState($, date))
 
 // Recomputes the pace and arms a timer for the next set or breather's end.
 const refreshPace = async ($: Engine): Promise<Pace | null> => {
@@ -237,7 +274,8 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
   dueTimer = undefined
   // Re-read today: the date may have rolled over, or the shell script logged reps.
   const t = await refreshToday($)
-  const s = t === null ? undefined : await schedule($, t.date)
+  const day = t === null ? {} : await readDayState($, t.date)
+  const s = scheduleOf(day)
   const now = await $.clock.now()
   let next: Pace | null = null
   if (t !== null && !t.isRest && s !== undefined) {
@@ -245,7 +283,8 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
     next = {
       ...left,
       required: left.required + s.base,
-      restUntil: (await breatherEnd($, t.date, now)) ?? null,
+      // A breather still running: catch-up reps owed, but prompts not held.
+      restUntil: day.breather !== undefined && day.breather > now ? day.breather : null,
       // A window set mid-day (base > 0) is never the day's opener, even after a reset.
       isOpening: s.base === 0 && t.count === 0 && left.behind > 0 && left.required <= left.setSize,
     }
@@ -329,9 +368,9 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   const s = await schedule($, after.date)
   if (owed !== null && s !== undefined && stillOwed > 0 && added > 0 && added >= (repSteps(owed.setSize)[0] ?? owed.setSize)) {
     const until = (await $.clock.now()) + breatherMs(after.goal - s.base, owed.setSize, s.ms)
-    await $.store.set('breather', { date: after.date, until })
+    await writeDayState($, after.date, state => ({ ...state, breather: until }))
   } else if (stillOwed <= 0 || added < 0) {
-    await $.store.delete('breather')
+    await endBreather($, after.date)
   }
   await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
@@ -584,7 +623,7 @@ export const register: Register = (on, options) => {
         const plan = { exercise: before.exercise, goal: cmd.n, ...(before.unit === '' ? {} : { unit: before.unit }) }
         await $.fs.write(`${(await files($)).log}/${before.date}.swap`, `${JSON.stringify(plan)}\n`)
         // A breather was sized for the old goal.
-        await $.store.delete('breather')
+        await endBreather($, before.date)
         await refreshHistory($)
         const after = await refreshToday($)
         return { text: `Today's goal is ${cmd.n}${after.unit} ${after.exercise}. ${line(after)}${paceText(await refreshPace($), isStrict, await $.clock.now())}` }
@@ -592,9 +631,9 @@ export const register: Register = (on, options) => {
       case 'window': {
         const t = await refreshToday($)
         // A breather was sized for the old window.
-        await $.store.delete('breather')
+        await endBreather($, t.date)
         if (cmd.hours === null) {
-          await $.store.delete('window')
+          await writeDayState($, t.date, ({ window: _, ...rest }) => rest)
           return {
             text: `Back to ${paceConfig.windowMs / HOUR_MS}h from your first prompt. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
           }
@@ -608,7 +647,7 @@ export const register: Register = (on, options) => {
         const d = new Date(now)
         const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
         const ms = Math.max(1, Math.min(cmd.hours * HOUR_MS, midnight - now - 60_000))
-        await $.store.set('window', { date: t.date, from: now, ms, base: t.count })
+        await writeDayState($, t.date, s => ({ ...s, window: { from: now, ms, base: t.count } }))
         const span = ms < cmd.hours * HOUR_MS ? 'between now and midnight' : `over the next ${cmd.hours}h (done by ${clockTime(now + ms)})`
         return {
           text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread ${span}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
@@ -625,8 +664,7 @@ export const register: Register = (on, options) => {
         const named = `${String(cmd.hour).padStart(2, '0')}:${String(cmd.minute).padStart(2, '0')}`
         if (end <= now) return { text: `${named} has already passed today. 3–4 digits are a clock time (1240 = 12:40); for hours from now, use 1–2 digits like /fit window 2.` }
         // The same window `/fit window <hours>` sets, ending at the time named.
-        await $.store.delete('breather')
-        await $.store.set('window', { date: t.date, from: now, ms: end - now, base: t.count })
+        await writeDayState($, t.date, ({ breather: _, ...s }) => ({ ...s, window: { from: now, ms: end - now, base: t.count } }))
         return {
           text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread between now and ${named}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
         }

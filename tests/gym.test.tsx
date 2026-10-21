@@ -98,6 +98,10 @@ const world = (
   return { clock, files, touch, toasts, open, config, calls, registered, below, box }
 }
 
+// A day's pace file, as the mod writes it beside the count.
+const day = (state: { start?: number; window?: { from: number; ms: number; base: number }; breather?: number }) =>
+  `${JSON.stringify(state)}\n`
+
 const fit = ($: Engine, args: string) =>
   $.command.run({
     command: 'fit',
@@ -896,7 +900,7 @@ describe('pace', () => {
   })
 
   test('strict: a mid-day hold points to /fit easy, never a refused /fit rest', { options: { strict: true } }, async ($, on) => {
-    world(on, new Map([[`${LOG}/2026-10-05`, '10\n']]), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
+    world(on, new Map([[`${LOG}/2026-10-05`, '10\n'], [`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
     await start($)
     const held = (await send($)).drop ?? ''
     expect(held).toContain('10 pushups due now')
@@ -913,9 +917,23 @@ describe('pace', () => {
   })
 
   test('a window is only for today', { options: { strict: true } }, async ($, on) => {
-    world(on, new Map(), { store: { window: { date: '2026-10-04', from: MONDAY_9AM - 20 * HOUR, ms: HOUR, base: 0 } } })
+    world(on, new Map([[`${LOG}/2026-10-04.day`, day({ window: { from: MONDAY_9AM - 20 * HOUR, ms: HOUR, base: 0 } })]]))
     await start($)
     expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
+  })
+
+  test('a day started in the plugin store before 0.1.5 still counts, until its file is written', { options: { strict: true } }, async ($, on) => {
+    const { files } = world(on, new Map(), {
+      store: {
+        dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP },
+        window: { date: '2026-10-04', from: MONDAY_9AM - 20 * HOUR, ms: HOUR, base: 0 },
+      },
+    })
+    await start($)
+    expect((await send($)).drop).toContain('20 pushups due now')
+    // The first write moves the day to its file, yesterday's window left behind.
+    await fit($, '10')
+    expect(JSON.parse(files.get(`${LOG}/2026-10-05.day`) ?? '{}')).toEqual({ start: MONDAY_9AM - GAP, breather: MONDAY_9AM + GAP / 2 })
   })
 
   test('strict: the next set comes due on schedule, with a toast', { options: { strict: true } }, async ($, on) => {
@@ -975,16 +993,17 @@ describe('pace', () => {
   })
 
   test('the day start survives a restart and the due timer comes back', async ($, on) => {
-    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05`, '10\n']]), {
-      store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - 60_000 } },
-    })
+    const { clock, toasts } = world(
+      on,
+      new Map([[`${LOG}/2026-10-05`, '10\n'], [`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - 60_000 })]]),
+    )
     await start($)
     await clock.advance(GAP - 60_000 + 1_000)
     expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups'))).toBe(true)
   })
 
   test('strict: a set logged while two behind earns a breather, then the rest is due', { options: { strict: true } }, async ($, on) => {
-    const { clock, toasts } = world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
+    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
     await start($)
     expect((await send($)).drop).toContain('20 pushups due now')
     expect((await fit($, '10')).text).toContain('10 due · rest for 27m')
@@ -1003,7 +1022,7 @@ describe('pace', () => {
   })
 
   test('strict: less than the smallest button, or clearing the debt, earns no breather', { options: { strict: true } }, async ($, on) => {
-    world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - GAP } } })
+    world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
     await start($)
     await fit($, '4')
     expect((await send($)).drop).toContain('16 pushups due now')
@@ -1022,7 +1041,7 @@ describe('pace', () => {
   })
 
   test('strict: clearing the debt or resetting ends the breather, so the next set is not hidden', { options: { strict: true } }, async ($, on) => {
-    const { clock, toasts } = world(on, new Map(), { store: { dayStart: { date: '2026-10-05', at: MONDAY_9AM - 2 * GAP + 60_000 } } })
+    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - 2 * GAP + 60_000 })]]))
     await start($)
     expect((await fit($, '10')).text).toContain('rest for')
     await fit($, '10')
@@ -1037,15 +1056,28 @@ describe('pace', () => {
   })
 
   test('a breather is only for today', { options: { strict: true } }, async ($, on) => {
-    world(on, new Map(), { store: { breather: { date: '2026-10-04', until: MONDAY_9AM + HOUR } } })
+    world(on, new Map([[`${LOG}/2026-10-04.day`, day({ breather: MONDAY_9AM + HOUR })]]))
     await start($)
     expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
   })
 
   test('yesterday\'s start does not count today', { options: { strict: true } }, async ($, on) => {
-    world(on, new Map(), { store: { dayStart: { date: '2026-10-04', at: MONDAY_9AM - 20 * HOUR } } })
+    world(on, new Map([[`${LOG}/2026-10-04.day`, day({ start: MONDAY_9AM - 20 * HOUR })]]))
     await start($)
     expect((await send($)).drop).toContain('Start the day with a set: 10 pushups')
+  })
+
+  test('strict: a breather earned in another session holds nothing here', { options: { strict: true } }, async ($, on) => {
+    const { clock, touch } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
+    await start($)
+    expect((await send($)).drop).toContain('20 pushups due now')
+    // The other session logs a set and earns its breather; this one sees both at its next poll.
+    await clock.advance(1_000)
+    touch(`${LOG}/2026-10-05`, '10\n')
+    touch(`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP, breather: MONDAY_9AM + GAP / 2 }))
+    await clock.advance(10_000)
+    expect((await send($)).drop).toBeUndefined()
+    expect((await fit($, '')).text).toContain('10 due · rest for')
   })
 })
 
@@ -1133,6 +1165,7 @@ test('a long streak is cached, so later refreshes skip the walk back', async ($,
   await start($)
   calls.length = 0
   expect((await fit($, '')).text).toContain('🔥40d')
-  // The window's 28 days are re-read; nothing older is.
-  expect(calls.filter(c => c === 'fs.exists').length).toBeLessThan(28 * 3 + 10)
+  // The window's 28 days are re-read (three files each), plus today's own few;
+  // nothing older is, which would be another 120.
+  expect(calls.filter(c => c === 'fs.exists').length).toBeLessThan(28 * 3 + 12)
 })
