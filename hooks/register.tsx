@@ -43,6 +43,8 @@ const ONBOARD_PANE = 'gym-onboard'
 const HISTORY_DAYS = 28
 const TOAST_MS = 10_000
 const HOUR_MS = 60 * 60_000
+// How often a session looks for reps another session, or the shell, logged.
+const SYNC_MS = 10_000
 
 // Toasts stay up long enough to read mid-set.
 const toast = ($: Engine, text: string) => $.ui.toast(text, { timeoutMs: TOAST_MS })
@@ -52,6 +54,10 @@ const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
 let dueTimer: { cancel: () => void } | undefined
 // Redraws the band each minute of a breather, so "rest for 13m" counts down.
 let restTicker: { cancel: () => void } | undefined
+// Polls the log on disk, which every session and the shell script share.
+let syncTimer: { cancel: () => void } | undefined
+// The log as this session last read it: the routine's time and each day's file.
+let seenOnDisk = ''
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
 const olderStreak = atom({ plugin: 'terminal-gym', key: 'olderStreak' } as const, 0)
@@ -334,6 +340,34 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   return after
 }
 
+// Everything on disk another session can change, as one string: the routine's
+// modification time, then each log file's name, size and time. A directory's
+// own time only moves when a file is added, not when today's count is rewritten.
+const diskFingerprint = async ($: Engine) => {
+  const { routine, log: logDir } = await files($)
+  const routineAt = (await $.fs.exists(routine)) ? (await $.fs.stat(routine)).mtimeMs : 0
+  const entries = (await $.fs.exists(logDir)) ? await $.fs.list(logDir) : []
+  return [routineAt, ...entries.map(entry => `${entry.name}:${entry.size}:${entry.mtimeMs}`)].join('|')
+}
+
+// Re-reads today, the history and the pace when the files changed since this
+// session last looked (or always, when forced). Two sessions share one log:
+// a set logged in one shows in the other's band within a poll.
+const syncFromDisk = async ($: Engine, isForced = false) => {
+  let now: string
+  try {
+    now = await diskFingerprint($)
+  } catch {
+    // A missing or unreadable directory: nothing to catch up on this time.
+    return false
+  }
+  if (!isForced && now === seenOnDisk) return false
+  seenOnDisk = now
+  await refreshHistory($)
+  await refreshPace($)
+  return true
+}
+
 // The reps the last nudge suggested, for the spinner.
 let nudgeReps = 0
 
@@ -451,11 +485,19 @@ const boot = async ($: Engine) => {
   await refreshHistory($)
   // Re-arms the due timer, which a restart or reload drops.
   await refreshPace($)
+  // Remember the log as read, then watch it for what other sessions log.
+  try {
+    seenOnDisk = await diskFingerprint($)
+  } catch {
+    seenOnDisk = ''
+  }
+  syncTimer?.cancel()
+  syncTimer = $.clock.every(SYNC_MS, () => void syncFromDisk($))
   // Last, so a refused registration can't leave the band without its state.
   await $.command.register({
     name: 'fit',
     description: "Log reps toward today's goal",
-    argumentHint: '[n | set n | reset | goal n | window hours|hhmm|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | start | hide]',
+    argumentHint: '[n | set n | reset | goal n | window hours|hhmm|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]',
     immediate: true,
   })
 }
@@ -619,6 +661,14 @@ export const register: Register = (on, options) => {
         const t = await refreshToday($)
         const shown = withStreak(t, await refreshHistory($), await read($, olderStreak))
         return { text: `${shown}${paceText(await refreshPace($), isStrict, await $.clock.now())}` }
+      }
+      case 'reload': {
+        // Every session reads the same files, so a reload is a fresh read of them.
+        await syncFromDisk($, true)
+        const t = await read($, today)
+        if (t === null) return { text: 'Reloaded from disk.' }
+        const shown = withStreak(t, await read($, history), await read($, olderStreak))
+        return { text: `Reloaded from disk. ${shown}${paceText(await read($, pace), isStrict, await $.clock.now())}` }
       }
     }
   })

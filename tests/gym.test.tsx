@@ -24,14 +24,38 @@ const world = (
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
     return { value: text }
   })
+  // When each file was last written, the way a real disk would tell it.
+  const mtimes = new Map<string, number>()
+  const touch = (path: string, text: string) => {
+    files.set(path, text)
+    mtimes.set(path, clock.now())
+  }
   on('fs.write', ($, e) => {
-    files.set(e.path, e.text)
+    touch(e.path, e.text)
     return { value: undefined }
+  })
+  const entry = (path: string) => ({
+    kind: 'file' as const,
+    size: files.get(path)?.length ?? 0,
+    mtimeMs: mtimes.get(path) ?? 0,
+    isLink: false,
+  })
+  on('fs.list', ($, e) => ({
+    value: [...files.keys()]
+      .filter(path => path.startsWith(`${e.path}/`) && !path.slice(e.path.length + 1).includes('/'))
+      .map(path => ({ name: path.slice(e.path.length + 1), ...entry(path) })),
+  }))
+  on('fs.stat', ($, e) => {
+    if (files.has(e.path)) return { value: entry(e.path) }
+    const isDir = [...files.keys()].some(path => path.startsWith(`${e.path}/`))
+    if (!isDir) throw new Error(`ENOENT ${e.path}`)
+    return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false } }
   })
   const calls: string[] = []
   on('fs.exists', ($, e) => {
     calls.push('fs.exists')
-    return { value: files.has(e.path) }
+    const isDir = [...files.keys()].some(path => path.startsWith(`${e.path}/`))
+    return { value: files.has(e.path) || isDir }
   })
   on('ui.toast', ($, e) => {
     toasts.push(e.text)
@@ -71,7 +95,7 @@ const world = (
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  return { clock, files, toasts, open, config, calls, registered, below, box }
+  return { clock, files, touch, toasts, open, config, calls, registered, below, box }
 }
 
 const fit = ($: Engine, args: string) =>
@@ -158,6 +182,37 @@ describe('logging', () => {
     await start($)
     const ran = await fit($, '')
     expect(ran.text).toContain('30/100 pushups')
+  })
+})
+
+describe('two sessions', () => {
+  test('reps logged in another session reach the band within a poll', async ($, on) => {
+    const { clock, touch, calls } = world(on)
+    await start($)
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: '0/100 pushups' })).toBeDefined()
+
+    // A quiet log: polls look, but read nothing back in.
+    calls.length = 0
+    await clock.advance(10_000)
+    expect(calls.filter(call => call === 'fs.exists').length).toBeLessThan(5)
+
+    // Another session (or the shell script) writes today's count.
+    await clock.advance(1_000)
+    touch(`${LOG}/2026-10-05`, '40\n')
+    await clock.advance(10_000)
+    expect(await ui.find({ type: 'Text', text: '40/100 pushups' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('/fit reload reads the log now, without waiting for a poll', async ($, on) => {
+    const { touch } = world(on)
+    await start($)
+    touch(`${LOG}/2026-10-05`, '25\n')
+    const ran = await fit($, 'reload')
+    expect(ran.text).toContain('Reloaded from disk. 💪')
+    expect(ran.text).toContain('25/100 pushups')
+    expect(parseFit('sync')).toEqual({ kind: 'reload' })
   })
 })
 

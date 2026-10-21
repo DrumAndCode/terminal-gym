@@ -47,6 +47,10 @@ Only prompts you type can be held. Background tasks, `/loop` runs, messages from
 
 Easy mode (the default) shows the same schedule on the band and the same reminders, but never holds a prompt.
 
+## Several sessions at once
+
+Every Claude Code session reads the same log in `~/.claude/fitness`, so a set you log in one counts in all of them. Each session checks the log every 10 seconds and redraws its band when another session, or the shell, wrote to it. `/fit reload` does the same read right away.
+
 ## Commands
 
 | Command | Does |
@@ -65,6 +69,7 @@ Easy mode (the default) shows the same schedule on the band and the same reminde
 | `/fit program` | pick your program (the walkthrough), or **Custom goals** to type each exercise's daily goal |
 | `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit rules` | house rules |
+| `/fit reload` | re-read today's log from disk now (`/fit sync` works too) |
 | `/fit start` | replay the welcome |
 | `/fit hide` | close panels |
 
@@ -105,6 +110,7 @@ A mod runs inside Claude Code, so here is everything Terminal Gym touches:
   - `command.run`: answers its own `/fit` command, and nothing else.
   - `session.start` and the SessionStart event after `/clear` or `/resume`: load today's state and register `/fit`. The event passes through unchanged.
   - `turn.start` and `turn.complete`: time the easy-mode nudge and refresh the band.
+  - a timer every 10 seconds: lists `~/.claude/fitness/log` and re-reads it when a file changed, so sessions stay in step.
   - `ui.render`: draws the band, the scoreboard, the house rules and the walkthrough, and (easy mode) the suggested set in the spinner.
 
 ## Requirements
