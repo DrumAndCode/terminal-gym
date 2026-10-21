@@ -228,19 +228,33 @@ const legacyDayState = async ($: Engine, date: string): Promise<DayState> => {
   })
 }
 
+// The file's state, or null when it doesn't parse: another session may be
+// mid-write, so a damaged file is read once more before giving up.
+const readDayFile = async ($: Engine, path: string): Promise<DayState | null> => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return asDayState(JSON.parse(await $.fs.read(path)))
+    } catch {
+      // Read it again.
+    }
+  }
+  return null
+}
+
 const readDayState = async ($: Engine, date: string): Promise<DayState> => {
   const path = await dayPath($, date)
   if (!(await $.fs.exists(path))) return legacyDayState($, date)
-  try {
-    return asDayState(JSON.parse(await $.fs.read(path)))
-  } catch {
-    return {}
-  }
+  return (await readDayFile($, path)) ?? {}
 }
 
+// A damaged file is never written over: that would make the other session's
+// loss permanent. The change is skipped, and the next one finds the file whole.
 const writeDayState = async ($: Engine, date: string, change: (state: DayState) => DayState) => {
-  const next = change(await readDayState($, date))
-  await $.fs.write(await dayPath($, date), `${JSON.stringify(next)}\n`)
+  const path = await dayPath($, date)
+  const state = (await $.fs.exists(path)) ? await readDayFile($, path) : await legacyDayState($, date)
+  if (state === null) return false
+  await $.fs.write(path, `${JSON.stringify(change(state))}\n`)
+  return true
 }
 
 // The day starts at the person's first prompt; sets are spread from there.
@@ -702,7 +716,7 @@ export const register: Register = (on, options) => {
       }
       case 'reload': {
         // Every session reads the same files, so a reload is a fresh read of them.
-        await syncFromDisk($, true)
+        if (!(await syncFromDisk($, true))) return { text: "Couldn't read ~/.claude/fitness just now. Nothing changed; try again." }
         const t = await read($, today)
         if (t === null) return { text: 'Reloaded from disk.' }
         const shown = withStreak(t, await read($, history), await read($, olderStreak))
