@@ -53,14 +53,15 @@ export type FitCommand =
   | { kind: 'goal'; n: number }
   // null: back to the configured window from the first prompt.
   | { kind: 'window'; hours: number | null }
+  | { kind: 'window-until'; hour: number; minute: number }
   | { kind: 'error'; text: string }
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|off | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
   if (head === '' || head === 'status') return { kind: 'status' }
-  if (head === 'score') return { kind: 'week' }
+  if (head === 'streak') return { kind: 'week' }
   if (head === 'rest') return value === 'off' ? { kind: 'unskip' } : { kind: 'skip' }
   if (head === 'program') return { kind: 'program' }
   if (head === 'swap') {
@@ -72,7 +73,7 @@ export const parseFit = (args: string): FitCommand => {
   if (head === 'hide') return { kind: 'hide' }
   if (head === 'reset') return { kind: 'reset' }
   if (head === 'start') return { kind: 'intro' }
-  if (head === 'strict') return { kind: 'strict', isOn: true }
+  if (head === 'strict') return { kind: 'strict', isOn: value !== 'off' }
   if (head === 'easy') return { kind: 'strict', isOn: false }
   if (head === 'set') {
     return value !== undefined && /^\d+$/.test(value)
@@ -86,11 +87,20 @@ export const parseFit = (args: string): FitCommand => {
   }
   if (head === 'window') {
     if (value === 'off') return { kind: 'window', hours: null }
+    // "1240", "940" or "12:40": an end time today, on the 24-hour clock.
+    const clock = value === undefined ? null : /^(\d{1,2}):?(\d{2})$/.exec(value)
+    if (clock !== null && (value?.includes(':') === true || (value?.length ?? 0) >= 3)) {
+      const hour = Number(clock[1])
+      const minute = Number(clock[2])
+      return hour < 24 && minute < 60
+        ? { kind: 'window-until', hour, minute }
+        : { kind: 'error', text: 'fit: window needs a time like 1240 or 12:40 (24-hour clock)' }
+    }
     // "3", "1.5" or "3h": hours from now, up to a day.
     const hours = value !== undefined && /^\d+(\.\d+)?h?$/.test(value) ? parseFloat(value) : NaN
     return hours > 0 && hours <= 24
       ? { kind: 'window', hours }
-      : { kind: 'error', text: 'fit: window needs hours from now (up to 24), like /fit window 3, or off' }
+      : { kind: 'error', text: 'fit: window needs hours from now (up to 24) like /fit window 3, an end time like 1240, or off' }
   }
   if (/^-?\d+$/.test(head)) return { kind: 'add', n: Number(head) }
   return { kind: 'error', text: USAGE }
@@ -130,14 +140,24 @@ export const fullStreak = (history: readonly Day[], older: number) => {
   return coversWindow ? run + older : run
 }
 
-// One row per week, seven 2-cell days with a gap: 20 columns.
+// The grid's colors as text colors, for its legend.
+export const GRID_COLORS = {
+  goal: `#${ACCENT.toString(16)}`,
+  some: `#${PARTIAL.toString(16)}`,
+  none: `#${EMPTY.toString(16)}`,
+} as const
+
+// One row per week, seven 2-cell days with a gap: 20 columns. A blank row
+// between weeks keeps the days square, so it reads as a grid, not bars.
 export const heatCells = (history: readonly Day[]) => {
   const weeks = Math.ceil(history.length / 7)
   const columns = 20
-  const words = new Uint32Array(columns * weeks * 3)
-  for (let row = 0; row < weeks; row++) {
+  const rows = Math.max(1, weeks * 2 - 1)
+  const words = new Uint32Array(columns * rows * 3)
+  for (let row = 0; row < rows; row++) {
+    const week = row / 2
     for (let col = 0; col < columns; col++) {
-      const day = history[row * 7 + Math.floor(col / 3)]
+      const day = row % 2 === 1 ? undefined : history[week * 7 + Math.floor(col / 3)]
       const isGap = col % 3 === 2 || day === undefined
       const color = isGap
         ? DEFAULT
@@ -148,21 +168,21 @@ export const heatCells = (history: readonly Day[]) => {
             : EMPTY
       const at = (row * columns + col) * 3
       // Today, the last day, is drawn shaded so it stands out from finished days.
-      const isToday = row * 7 + Math.floor(col / 3) === history.length - 1
+      const isToday = row % 2 === 0 && week * 7 + Math.floor(col / 3) === history.length - 1
       words[at] = isGap ? 0x20 : isToday ? 0x2592 : 0x2588
       words[at + 1] = color
       words[at + 2] = DEFAULT
     }
   }
-  return { columns, rows: weeks, cells: (new Uint8Array(words.buffer) as Base64Bytes).toBase64() }
+  return { columns, rows, cells: (new Uint8Array(words.buffer) as Base64Bytes).toBase64() }
 }
 
-// Grey until the first rep, then a muted traffic light: red under a third of the
-// goal, yellow on the way, green for the last fifth. No goal: undefined draws dim.
+// Grey until the first rep, then yellow on the way and green for the last fifth.
+// No red: an unfinished day is work in progress, not an error. No goal: undefined draws dim.
 export const progressColor = (count: number, goal: number) => {
   if (goal <= 0 || count <= 0) return undefined
   const share = count / goal
-  return share >= 0.8 ? '#87af87' : share >= 1 / 3 ? '#d7af5f' : '#d75f5f'
+  return share >= 0.8 ? '#87af87' : '#d7af5f'
 }
 
 export const daily = (exercise: string, goal: number): Routine =>
@@ -183,6 +203,28 @@ export const scale = (routine: Routine, factor: number): Routine =>
       { ...plan, goal: Math.max(5, Math.round((plan.goal * factor) / 5) * 5) },
     ]),
   )
+
+// Each exercise in a routine once, with its first day's goal.
+export const exerciseGoals = (routine: Routine) => {
+  const goals: Record<string, number> = {}
+  for (const plan of Object.values(routine)) goals[plan.exercise] ??= plan.goal
+  return goals
+}
+
+// A custom program: the base routine's days, each exercise at the goal typed
+// for it. A field left at its prefill changes nothing, so days that differ keep
+// their own goals. Undefined while any goal isn't a whole number above zero.
+export const customRoutine = (base: Routine, goals: Record<string, string>): Routine | undefined => {
+  const parsed = new Map<string, number>()
+  for (const [exercise, prefill] of Object.entries(exerciseGoals(base))) {
+    const text = (goals[exercise] ?? '').trim()
+    if (!/^\d+$/.test(text) || Number(text) <= 0) return undefined
+    if (Number(text) !== prefill) parsed.set(exercise, Number(text))
+  }
+  return Object.fromEntries(
+    Object.entries(base).map(([day, plan]) => [day, { ...plan, goal: parsed.get(plan.exercise) ?? plan.goal }]),
+  )
+}
 
 // "30 burpees" typed under Other: one exercise every day.
 export const parseCustom = (text: string): Routine | undefined => {
@@ -269,7 +311,7 @@ export const paceAt = (
   }
 }
 
-// Behind by more than a set, a full set logged earns a breather of half the gap
+// Behind, a set logged (a short one counts) earns a breather of half the gap
 // between sets before the rest is due: catching up never means back-to-back sets.
 export const breatherMs = (goal: number, setSize: number, windowMs: number) =>
   goal <= 0 || setSize <= 0 ? 0 : setGap(goal, setSize, windowMs) / 2
@@ -300,9 +342,9 @@ or press a **+** button above the prompt (sized to your set)
 | \`/fit goal 60\` | change today's goal |
 | \`/fit window 3\` | finish today in the next 3h |
 | \`/fit swap\` | switch today's exercise |
-| \`/fit rest\` | rest day (breaks streak) |
+| \`/fit rest\` | rest day, before any reps (breaks streak) |
 | \`/fit rest off\` | undo today's rest day |
-| \`/fit score\` | streak + grid |
+| \`/fit streak\` | streak + grid |
 | \`/fit program\` | pick your training |
 | \`/fit strict\` / \`/fit easy\` | strict mode on / off |
 | \`/fit rules\` | these rules |
@@ -316,9 +358,9 @@ Off by default. When it's on:
 - prompts before 5am count as the night before
 - the first set is due right away
 - fall behind and your prompts wait until you catch up
-- more than a set behind? one set earns a breather before the rest
+- log a set, even a short one, and you get a breather before the rest
 - a toast tells you when each set comes due
-- \`/fit rest\` bails, but costs your streak
+- \`/fit easy\` stops holding prompts; \`/fit rest\` (before any reps) takes the day off
 
 **Turn it on:** type \`/fit strict\`
 **Turn it off:** type \`/fit easy\`

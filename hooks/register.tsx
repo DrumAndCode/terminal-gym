@@ -16,10 +16,13 @@ import {
   setSizeFor,
   buttonsWidth,
   cells,
+  customRoutine,
   dayKey,
+  exerciseGoals,
   fullStreak,
   keepsStreak,
   describeRoutine,
+  GRID_COLORS,
   heatCells,
   lastDays,
   parseFit,
@@ -47,6 +50,8 @@ const toast = ($: Engine, text: string) => $.ui.toast(text, { timeoutMs: TOAST_M
 // The pace settings, set from the options each time the module registers.
 const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
 let dueTimer: { cancel: () => void } | undefined
+// Redraws the band each minute of a breather, so "rest for 13m" counts down.
+let restTicker: { cancel: () => void } | undefined
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
 const olderStreak = atom({ plugin: 'terminal-gym', key: 'olderStreak' } as const, 0)
@@ -59,6 +64,9 @@ const onboardPick = atom({ plugin: 'terminal-gym', key: 'onboardPick' } as const
   program: 'Push · dip · squat rotation',
   size: 'Standard',
   hasRoutine: false,
+  base: DEFAULT_ROUTINE,
+  custom: {},
+  isCustomInvalid: false,
 })
 
 // Same files as the `fit` shell script, so both agree.
@@ -228,9 +236,27 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
   let next: Pace | null = null
   if (t !== null && !t.isRest && s !== undefined) {
     const left = paceAt(Math.max(0, t.goal - s.base), t.count - s.base, setSizeFor(t.goal, paceConfig.setSize), s.from, now, s.ms)
-    next = { ...left, required: left.required + s.base, restUntil: (await breatherEnd($, t.date, now)) ?? null }
+    next = {
+      ...left,
+      required: left.required + s.base,
+      restUntil: (await breatherEnd($, t.date, now)) ?? null,
+      // A window set mid-day (base > 0) is never the day's opener, even after a reset.
+      isOpening: s.base === 0 && t.count === 0 && left.behind > 0 && left.required <= left.setSize,
+    }
   }
   await update($, pace, () => next)
+  restTicker?.cancel()
+  restTicker = undefined
+  const restUntil = next?.restUntil ?? null
+  if (restUntil !== null) {
+    const tick = () => {
+      restTicker = $.clock.after(60_000, async () => {
+        $.ui.invalidate('ui.render')
+        if ((await $.clock.now()) < restUntil) tick()
+      })
+    }
+    tick()
+  }
   const wakeAt = Math.min(next?.nextDueAt ?? Infinity, next?.restUntil ?? Infinity)
   if (wakeAt !== Infinity && t !== null && t.count < t.goal) {
     dueTimer = $.clock.after(Math.max(1, wakeAt - now), () => void setDue($))
@@ -242,7 +268,9 @@ const setDue = async ($: Engine) => {
   const p = await refreshPace($)
   const t = await read($, today)
   if (p === null || t === null || p.behind <= 0 || p.restUntil !== null) return
-  toast($, `⏱ Set due: ${p.behind} ${t.exercise}. ${p.required}/${t.goal} by now.`)
+  toast($, p.isOpening === true
+    ? `🏁 First set: ${p.behind} ${t.exercise} to start the day.`
+    : `⏱ Set due: ${p.behind} ${t.exercise}. ${p.required}/${t.goal} by now.`)
 }
 
 // A Close button's press: a refused close says why instead of doing nothing.
@@ -254,10 +282,14 @@ const closePane = async ($: Engine, id: string) => {
   }
 }
 
-const paceText = (p: Pace | null, isStrict: boolean) => {
+// Owed reps read as a set that's due, not a debt; a breather as rest left.
+const paceText = (p: Pace | null, isStrict: boolean, now: number) => {
   if (p === null) return ''
-  if (p.behind > 0 && p.restUntil !== null) return `  behind ${p.behind} · breather to ${clockTime(p.restUntil)}`
-  if (p.behind > 0) return `  behind ${p.behind}${isStrict ? ' · prompts wait' : ''}`
+  if (p.isOpening === true) return `  🏁 first set: ${p.behind} to start the day`
+  if (p.behind > 0 && p.restUntil !== null) {
+    return `  ${p.behind} due · rest for ${Math.max(1, Math.ceil((p.restUntil - now) / 60_000))}m`
+  }
+  if (p.behind > 0) return `  ${p.behind} due now${isStrict ? ' · log it to keep prompting' : ''}`
   return p.nextDueAt === null ? '' : `  next set ${clockTime(p.nextDueAt)}`
 }
 
@@ -283,12 +315,13 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
     days.map(day => (day.date === after.date ? { ...day, count } : day)),
   )
 
-  // A full set that still leaves reps owed earns a breather before the rest.
-  // Clearing the debt or lowering the count ends one, so later sets aren't hidden.
+  // A set that still leaves reps owed earns a breather before the rest: a short
+  // one counts, down to the band's smallest button. Clearing the debt or
+  // lowering the count ends one, so later sets aren't hidden.
   const added = count - before.count
   const stillOwed = owed === null ? 0 : owed.behind - added
   const s = await schedule($, after.date)
-  if (owed !== null && s !== undefined && stillOwed > 0 && added >= owed.setSize) {
+  if (owed !== null && s !== undefined && stillOwed > 0 && added > 0 && added >= (repSteps(owed.setSize)[0] ?? owed.setSize)) {
     const until = (await $.clock.now()) + breatherMs(after.goal - s.base, owed.setSize, s.ms)
     await $.store.set('breather', { date: after.date, until })
   } else if (stillOwed <= 0 || added < 0) {
@@ -301,12 +334,20 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   return after
 }
 
-// Easy mode: a suggestion once a turn runs long.
-const nudge = async ($: Engine, reps: number) => {
+// The reps the last nudge suggested, for the spinner.
+let nudgeReps = 0
+
+// Easy mode: a suggestion once a turn runs long, sized to the set that's due.
+// On pace or in a breather there's nothing owed, so nothing to suggest.
+const nudge = async ($: Engine) => {
+  const p = await refreshPace($)
   const t = await read($, today)
   if (t === null || t.isRest || (t.goal > 0 && t.count >= t.goal)) return
+  if (p !== null && (p.behind <= 0 || p.restUntil !== null)) return
+  nudgeReps = p === null ? setSizeFor(t.goal, paceConfig.setSize) : Math.min(p.behind, p.setSize)
+  if (nudgeReps <= 0) return
   await update($, isWaiting, () => true)
-  toast($, `Your agent's mid-set. You next: ${reps} ${t.exercise}.`)
+  toast($, `Your agent's mid-set. You next: ${nudgeReps} ${t.exercise}.`)
 }
 
 const endRest = async ($: Engine) => {
@@ -325,6 +366,7 @@ const markIntroduced = async ($: Engine) => {
 }
 
 const KEEP = 'Keep my current routine'
+const CUSTOM = 'Custom goals'
 const DEFAULT_PROGRAM = 'Push · dip · squat rotation'
 
 const openOnboarding = async ($: Engine) => {
@@ -336,26 +378,50 @@ const openOnboarding = async ($: Engine) => {
   if (!opened.isPlaced) toast($, 'Widen the terminal to see the walkthrough, or type /fit program.')
   // A seeded default counts as no routine of their own; only custom ones get "keep".
   const { routine: routinePath } = await files($)
-  const hasRoutine =
-    (await $.fs.exists(routinePath)) &&
-    JSON.stringify(await loadRoutine($, routinePath)) !== JSON.stringify(DEFAULT_ROUTINE)
+  const base = await loadRoutine($, routinePath)
+  const hasRoutine = JSON.stringify(base) !== JSON.stringify(DEFAULT_ROUTINE)
+  // Custom starts from the current routine's days and goals.
+  const custom = Object.fromEntries(Object.entries(exerciseGoals(base)).map(([name, goal]) => [name, String(goal)]))
   await update($, onboardPick, () => ({
     program: hasRoutine ? KEEP : DEFAULT_PROGRAM,
     size: 'Standard',
     hasRoutine,
+    base,
+    custom,
+    isCustomInvalid: false,
   }))
 }
 
 const pickedRoutine = (p: OnboardPick): Routine | undefined => {
+  if (p.program === CUSTOM) return customRoutine(p.base, p.custom)
   const preset = ROUTINES[p.program as keyof typeof ROUTINES] as Routine | undefined
   return preset === undefined ? undefined : scale(preset, SIZES[p.size as keyof typeof SIZES] ?? 1)
+}
+
+// A new program changes today on; the days before keep the plan they were
+// trained against, written down as their own plan the way `/fit swap` does.
+const freezePastDays = async ($: Engine, old: Routine) => {
+  const { log: logDir } = await files($)
+  for (const ms of lastDays(await $.clock.now(), HISTORY_DAYS).slice(0, -1)) {
+    const path = `${logDir}/${dayKey(ms)}.swap`
+    const plan = old[weekdayKey(ms)]
+    if (plan !== undefined && !(await $.fs.exists(path))) await $.fs.write(path, `${JSON.stringify(plan)}\n`)
+  }
 }
 
 const finishOnboarding = async ($: Engine) => {
   const p = await read($, onboardPick)
   const { routine: routinePath } = await files($)
   const routine = pickedRoutine(p)
+  // A custom goal that isn't a number sends the person back to fix it.
+  if (p.program === CUSTOM && routine === undefined) {
+    await update($, onboardPick, now => ({ ...now, isCustomInvalid: true }))
+    await update($, onboardStep, () => 1)
+    return
+  }
   if (routine !== undefined) {
+    const old = await loadRoutine($, routinePath)
+    if (JSON.stringify(old) !== JSON.stringify(routine)) await freezePastDays($, old)
     if (p.hasRoutine) await $.fs.write(`${routinePath}.bak`, await $.fs.read(routinePath))
     await $.fs.write(routinePath, `${JSON.stringify(routine, null, 2)}\n`)
   }
@@ -389,7 +455,7 @@ const boot = async ($: Engine) => {
   await $.command.register({
     name: 'fit',
     description: "Log reps toward today's goal",
-    argumentHint: '[n | set n | reset | goal n | window hours|off | swap [exercise] | rest [off] | score | program | rules | strict | easy | start | hide]',
+    argumentHint: '[n | set n | reset | goal n | window hours|hhmm|off | swap [exercise] | rest [off] | streak | program | rules | strict | easy | start | hide]',
     immediate: true,
   })
 }
@@ -397,7 +463,6 @@ const boot = async ($: Engine) => {
 export const register: Register = (on, options) => {
   const isStrict = options.strict === true
   const nudgeMs = Number(options.nudgeSeconds ?? 30) * 1000
-  const nudgeReps = Number(options.nudgeReps ?? 10)
   // Whole reps only: a fractional set would make fractional buttons.
   paceConfig.setSize = Math.max(0, Math.round(Number(options.setSize ?? 0)) || 0)
   paceConfig.windowMs = Math.max(1, Number(options.windowHours ?? 8)) * HOUR_MS
@@ -425,11 +490,15 @@ export const register: Register = (on, options) => {
         if ((await refreshToday($)).isRest) return { text: "Today's a rest day. /fit rest off to train." }
         const n = cmd.n
         const t = await logReps($, count => (cmd.kind === 'add' ? count + n : n))
-        return { text: `${line(t)}${paceText(await read($, pace), isStrict)}` }
+        return { text: `${line(t)}${paceText(await read($, pace), isStrict, await $.clock.now())}` }
       }
       case 'skip': {
         const t = await refreshToday($)
         if (t.isRest) return { text: 'Already a rest day. /fit rest off to train.' }
+        // Reps logged means a training day: a rest day would wipe the streak.
+        if (t.count > 0) {
+          return { text: `You've logged ${t.count}${t.unit} ${t.exercise} today, so it's a training day. /fit rest is for a day off; it resets your streak.` }
+        }
         await $.fs.write(`${(await files($)).log}/${t.date}.skip`, '')
         await refreshToday($)
         await refreshHistory($)
@@ -445,7 +514,7 @@ export const register: Register = (on, options) => {
         }
         const days = await refreshHistory($)
         await $.ui.open({ id: PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
-        return { text: `🔥 ${fullStreak(days, await read($, olderStreak))}-day streak · Esc or /fit score to close` }
+        return { text: `🔥 ${fullStreak(days, await read($, olderStreak))}-day streak · Esc or /fit streak to close` }
       }
       case 'swap': {
         const before = await refreshToday($)
@@ -476,7 +545,7 @@ export const register: Register = (on, options) => {
         await $.store.delete('breather')
         await refreshHistory($)
         const after = await refreshToday($)
-        return { text: `Today's goal is ${cmd.n}${after.unit} ${after.exercise}. ${line(after)}${paceText(await refreshPace($), isStrict)}` }
+        return { text: `Today's goal is ${cmd.n}${after.unit} ${after.exercise}. ${line(after)}${paceText(await refreshPace($), isStrict, await $.clock.now())}` }
       }
       case 'window': {
         const t = await refreshToday($)
@@ -485,7 +554,7 @@ export const register: Register = (on, options) => {
         if (cmd.hours === null) {
           await $.store.delete('window')
           return {
-            text: `Back to ${paceConfig.windowMs / HOUR_MS}h from your first prompt. ${line(t)}${paceText(await refreshPace($), isStrict)}`,
+            text: `Back to ${paceConfig.windowMs / HOUR_MS}h from your first prompt. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
           }
         }
         if (t.isRest) return { text: "Today's a rest day. /fit rest off to train." }
@@ -500,7 +569,24 @@ export const register: Register = (on, options) => {
         await $.store.set('window', { date: t.date, from: now, ms, base: t.count })
         const span = ms < cmd.hours * HOUR_MS ? 'between now and midnight' : `over the next ${cmd.hours}h (done by ${clockTime(now + ms)})`
         return {
-          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread ${span}. ${line(t)}${paceText(await refreshPace($), isStrict)}`,
+          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread ${span}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
+        }
+      }
+      case 'window-until': {
+        const t = await refreshToday($)
+        if (t.isRest) return { text: "Today's a rest day. /fit rest off to train." }
+        if (t.goal <= 0) return { text: 'No goal today. /fit goal 60 to set one.' }
+        if (t.count >= t.goal) return { text: `Today's goal is done. ${line(t)}` }
+        const now = await $.clock.now()
+        const d = new Date(now)
+        const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), cmd.hour, cmd.minute).getTime()
+        const named = `${String(cmd.hour).padStart(2, '0')}:${String(cmd.minute).padStart(2, '0')}`
+        if (end <= now) return { text: `${named} has already passed today. 3–4 digits are a clock time (1240 = 12:40); for hours from now, use 1–2 digits like /fit window 2.` }
+        // The same window `/fit window <hours>` sets, ending at the time named.
+        await $.store.delete('breather')
+        await $.store.set('window', { date: t.date, from: now, ms: end - now, base: t.count })
+        return {
+          text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread between now and ${named}. ${line(t)}${paceText(await refreshPace($), isStrict, await $.clock.now())}`,
         }
       }
       case 'program':
@@ -511,7 +597,7 @@ export const register: Register = (on, options) => {
         await update($, isIntroduced, () => false)
         return { text: 'Welcome is back above your prompt.' }
       case 'reset':
-        return { text: `Reset. ${line(await logReps($, () => 0))}${paceText(await read($, pace), isStrict)}` }
+        return { text: `Reset. ${line(await logReps($, () => 0))}${paceText(await read($, pace), isStrict, await $.clock.now())}` }
       case 'help':
         await markIntroduced($)
         await $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })
@@ -532,7 +618,7 @@ export const register: Register = (on, options) => {
       case 'status': {
         const t = await refreshToday($)
         const shown = withStreak(t, await refreshHistory($), await read($, olderStreak))
-        return { text: `${shown}${paceText(await refreshPace($), isStrict)}` }
+        return { text: `${shown}${paceText(await refreshPace($), isStrict, await $.clock.now())}` }
       }
     }
   })
@@ -548,8 +634,13 @@ export const register: Register = (on, options) => {
     // Claude Code puts a dropped prompt back in the box itself; a fill here
     // as well left it there twice.
     if (isStrict && p !== null && p.behind > 0 && p.restUntil === null) {
+      if (p.isOpening === true) {
+        return {
+          drop: `Start the day with a set: ${p.behind} ${t?.exercise ?? 'reps'}. /fit ${p.behind} to log it, then send your prompt. /fit rest skips the day (breaks streak).`,
+        }
+      }
       return {
-        drop: `Behind pace: ${p.behind} ${t?.exercise ?? 'reps'} to catch up (${p.required}/${t?.goal ?? 0} due by now). /fit ${p.behind} to log. /fit rest skips the day (breaks streak).`,
+        drop: `${p.behind} ${t?.exercise ?? 'reps'} due now (${p.required}/${t?.goal ?? 0} by now). /fit ${p.behind} to log it, then send your prompt. /fit easy stops holding prompts.`,
       }
     }
     return next(e)
@@ -557,7 +648,7 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     timer?.cancel()
-    if (!isStrict && options.nudges !== false) timer = $.clock.after(nudgeMs, () => void nudge($, nudgeReps))
+    if (!isStrict && options.nudges !== false) timer = $.clock.after(nudgeMs, () => void nudge($))
     return next(e)
   })
 
@@ -649,7 +740,7 @@ export const register: Register = (on, options) => {
     const days = await read($, history)
     const color = progressColor(t.count, t.goal)
     const add = (n: number) => () => void logReps($, count => count + n)
-    const progress = `${line(t)}${paceText(await read($, pace), isStrict)}`
+    const progress = `${line(t)}${paceText(await read($, pace), isStrict, await $.clock.now())}`
     const run = fullStreak(days, await read($, olderStreak))
     const streakText = run > 0 ? `  🔥${run}d` : ''
     const LOG_LABEL = 'log reps: '
@@ -679,7 +770,6 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const days = await read($, history)
-    const t = await read($, today)
     const run = fullStreak(days, await read($, olderStreak))
     const heat = heatCells(days)
     const week = days.slice(-7)
@@ -690,26 +780,39 @@ export const register: Register = (on, options) => {
     const barbell =
       e.surface === 'terminal' && e.props.bodyColumns >= BARBELL.width ? (
         <Box flexDirection="column">
-          <Text color="#d7af5f">{BARBELL.plates}</Text>
+          <Text>{BARBELL.plates}</Text>
           <Box>
-            <Text color="#d7af5f">{BARBELL.left}</Text>
+            <Text>{BARBELL.left}</Text>
             <Text bold>{BARBELL.name}</Text>
-            <Text color="#d7af5f">{BARBELL.right}</Text>
+            <Text>{BARBELL.right}</Text>
           </Box>
-          <Text color="#d7af5f">{BARBELL.plates}</Text>
+          <Text>{BARBELL.plates}</Text>
           <Text> </Text>
         </Box>
       ) : (
         <Text bold>{BARBELL.name}</Text>
       )
 
+    // One row a day: date, its progress bar in the band's colors, then the count.
     // Counts padded to one width so the exercise names line up.
-    const counts = week.map(day => `${day.count}/${day.goal}`)
+    const counts = week.map(day => (day.isSkipped ? 'rest' : `${day.count}/${day.goal}`))
     const countWidth = Math.max(0, ...counts.map(count => count.length))
+    const filled = (day: Day) => (day.goal > 0 ? Math.min(10, Math.floor((day.count / day.goal) * 10)) : 0)
     const summary = week.map((day, i) => {
       const mark = day.isSkipped ? '–' : day.goal > 0 && day.count >= day.goal ? '✓' : '·'
       const isToday = i === week.length - 1
-      return `${mark} ${day.date.slice(5)}  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}${isToday ? '  ◀ today' : ''}`
+      const color = day.isSkipped ? undefined : progressColor(day.count, day.goal)
+      return (
+        <Box key={`day-${day.date}`}>
+          <Text dimColor={!isToday} bold={isToday}>{`${mark} ${day.date.slice(5)}  `}</Text>
+          {/* Thin lines, not shaded blocks: blocks on stacked rows merge into slabs. */}
+          <Text color={color ?? GRID_COLORS.none}>{'━'.repeat(day.isSkipped ? 0 : filled(day))}</Text>
+          <Text dimColor>{(day.isSkipped ? '╌' : '─').repeat(10 - (day.isSkipped ? 0 : filled(day)))}</Text>
+          <Text dimColor={!isToday} bold={isToday}>
+            {`  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}${isToday ? '  ◀ today' : ''}`}
+          </Text>
+        </Box>
+      )
     })
 
     if (e.surface === 'terminal') {
@@ -718,18 +821,21 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column">
           {barbell}
           <Text bold>🔥 {run}-day streak</Text>
-          {t !== null && <Text dimColor>{line(t)}</Text>}
           <Text> </Text>
-          <Text dimColor>last {HISTORY_DAYS} days · ▒ today</Text>
+          {summary}
+          <Text> </Text>
+          <Text dimColor>last {HISTORY_DAYS / 7} weeks, a square a day</Text>
           <Raster key="heat" {...heat} />
+          <Box>
+            <Text color={GRID_COLORS.goal}>█ </Text>
+            <Text dimColor>goal  </Text>
+            <Text color={GRID_COLORS.some}>█ </Text>
+            <Text dimColor>some reps  </Text>
+            <Text color={GRID_COLORS.none}>█ </Text>
+            <Text dimColor>none  ▒ today</Text>
+          </Box>
           <Text> </Text>
-          {summary.map((row, i) => (
-            <Text dimColor={i !== summary.length - 1} bold={i === summary.length - 1}>
-              {row}
-            </Text>
-          ))}
-          <Text> </Text>
-          <Text dimColor>Esc or /fit score to close</Text>
+          <Text dimColor>Esc or /fit streak to close</Text>
           <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
         </Box>
       )
@@ -740,8 +846,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {barbell}
         <Text bold>🔥 {run}-day streak</Text>
-        {t !== null && <Text dimColor>{line(t)}</Text>}
-        {summary.map(row => <Text dimColor>{row}</Text>)}
+        {summary}
         <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
       </Box>
     )
@@ -766,7 +871,14 @@ export const register: Register = (on, options) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const step = await read($, onboardStep)
     const p = await read($, onboardPick)
-    const go = (to: number) => () => void update($, onboardStep, () => to)
+    const go = (to: number) => async () => {
+      // Custom goals must all be numbers before leaving the program step.
+      if (step === 1 && to > step && p.program === CUSTOM && pickedRoutine(p) === undefined) {
+        await update($, onboardPick, now => ({ ...now, isCustomInvalid: true }))
+        return
+      }
+      await update($, onboardStep, () => to)
+    }
     const choose = (patch: Partial<OnboardPick>) => () => void update($, onboardPick, now => ({ ...now, ...patch }))
     const dots = [0, 1, 2].map(i => (i === step ? '●' : '○')).join(' ')
 
@@ -809,8 +921,32 @@ export const register: Register = (on, options) => {
     }
 
     if (step === 1) {
-      const programs = [...(p.hasRoutine ? [KEEP] : []), ...Object.keys(ROUTINES)]
+      // The mobile app draws no Input, so Custom needs another surface there.
+      const elements = $.ui.resolve(e)
+      const Input = e.surface !== 'mobile' && 'Input' in elements ? elements.Input : undefined
+      const programs = [...(p.hasRoutine ? [KEEP] : []), ...Object.keys(ROUTINES), ...(Input === undefined ? [] : [CUSTOM])]
       const routine = pickedRoutine(p)
+      const isCustom = p.program === CUSTOM
+      const setGoal = (exercise: string) => (value: string) =>
+        void update($, onboardPick, now => ({ ...now, custom: { ...now.custom, [exercise]: value }, isCustomInvalid: false }))
+      const fields = Input !== undefined && isCustom && (
+        <Box flexDirection="column">
+          <Text> </Text>
+          <Text dimColor>Daily goal per exercise</Text>
+          {Object.entries(exerciseGoals(p.base)).map(([exercise, goal]) => (
+            <Input
+              key={`goal-${exercise}`}
+              label={`${exercise} `}
+              placeholder={String(goal)}
+              value={p.custom[exercise] ?? ''}
+              submitLabel="set"
+              onInput={setGoal(exercise)}
+              onSubmit={setGoal(exercise)}
+            />
+          ))}
+          {p.isCustomInvalid && <Text color="#d75f5f">Every goal needs a whole number above 0.</Text>}
+        </Box>
+      )
       return (
         <Box flexDirection="column">
           {header('Pick your program')}
@@ -822,7 +958,8 @@ export const register: Register = (on, options) => {
               onPress={choose({ program: name })}
             />
           ))}
-          {routine !== undefined && (
+          {fields}
+          {routine !== undefined && !isCustom && (
             <Box flexDirection="column">
               <Text> </Text>
               <Text dimColor>Goal size</Text>
@@ -842,7 +979,13 @@ export const register: Register = (on, options) => {
             </Box>
           )}
           <Text> </Text>
-          <Text dimColor>{routine === undefined ? 'Your routine stays as it is.' : describeRoutine(routine)}</Text>
+          <Text dimColor>
+            {routine !== undefined
+              ? describeRoutine(routine)
+              : isCustom
+                ? 'Your days stay as they are, at these goals.'
+                : 'Your routine stays as it is.'}
+          </Text>
           <Text> </Text>
           {nav}
         </Box>
@@ -878,7 +1021,7 @@ export const register: Register = (on, options) => {
         <Text dimColor>A day with none, or a rest day, resets it to zero.</Text>
         <Text> </Text>
         <Text>See every day as a grid:</Text>
-        <Text dimColor>  type /fit score</Text>
+        <Text dimColor>  type /fit streak</Text>
         {preview}
         <Text> </Text>
         {nav}

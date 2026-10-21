@@ -30,7 +30,7 @@
     "strict": {
       "type": "boolean",
       "title": "Strict mode",
-      "description": "Spread today's goal into sets from your first prompt; fall behind and prompts wait until you catch up (/fit rest breaks your streak instead).",
+      "description": "Spread today's goal into sets from your first prompt; fall behind and prompts wait until you catch up (/fit easy turns holding off).",
       "default": false
     },
     "windowHours": {
@@ -50,12 +50,6 @@
       "title": "Nudge after (seconds)",
       "description": "How long a turn runs before Terminal Gym suggests a set.",
       "default": 30
-    },
-    "nudgeReps": {
-      "type": "number",
-      "title": "Reps per nudge",
-      "description": "Reps suggested per long turn in easy mode.",
-      "default": 10
     },
     "spinner": {
       "type": "boolean",
