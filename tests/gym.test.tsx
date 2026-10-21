@@ -1134,6 +1134,21 @@ describe('pace', () => {
     expect((await send($)).drop).toContain('pushups due now')
   })
 
+  test('a half-written day file is left alone until it is whole again', { options: { strict: true } }, async ($, on) => {
+    const { clock, files, touch } = world(on, new Map([[`${LOG}/2026-10-05.day`, '{"start": 17']]))
+    await start($)
+    // Another session is mid-write: this one neither starts the day over nor holds the prompt.
+    expect((await send($)).drop).toBeUndefined()
+    expect(files.get(`${LOG}/2026-10-05.day`)).toBe('{"start": 17')
+    // Nor does a set logged now write over it.
+    await fit($, '10')
+    expect(files.get(`${LOG}/2026-10-05.day`)).toBe('{"start": 17')
+    // Whole again, the next poll reads it: the day started a gap ago, so a set is due.
+    touch(`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP }))
+    await clock.advance(10_000)
+    expect((await send($)).drop).toContain('10 pushups due now')
+  })
+
   test('strict: a breather earned in another session holds nothing here', { options: { strict: true } }, async ($, on) => {
     const { clock, touch } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
     await start($)
