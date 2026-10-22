@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, cells, customRoutine, heatCells, moveGoal, nextGoal, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, stepFor, streak, untilText } from '../hooks/lib'
+import { buttonsWidth, canProgress, cells, customRoutine, heatCells, moveGoal, nextGoal, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, stepFor, streak, untilText } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -1298,7 +1298,10 @@ describe('progressive goals', () => {
     expect(nextGoal(100, [session(60, 60)])).toBeUndefined()
     expect(nextGoal(105, [session(100, 100)])).toBeUndefined()
     expect(nextGoal(110, [session(80, 110), session(90, 105)])).toBeUndefined()
-    expect(nextGoal(5, [session(1, 5), session(2, 5)])).toBe(5)
+    // At the floor, or under it from a custom goal, a step back never moves up.
+    expect(nextGoal(5, [session(1, 5), session(2, 5)])).toBeUndefined()
+    expect(nextGoal(3, [session(1, 3), session(2, 3)])).toBeUndefined()
+    expect(nextGoal(10, [session(1, 10), session(2, 10)])).toBe(5)
     expect(parseFit('progress')).toEqual({ kind: 'progress', isOn: true })
     expect(parseFit('progress off')).toEqual({ kind: 'progress', isOn: false })
   })
@@ -1306,6 +1309,17 @@ describe('progressive goals', () => {
   test('moving a goal leaves days a custom program set apart', async () => {
     const routine = { mon: { exercise: 'pushups', goal: 100 }, thu: { exercise: 'pushups', goal: 50 }, tue: { exercise: 'dips', goal: 100 } }
     expect(moveGoal(routine, 'pushups', 100, 105)).toEqual({ ...routine, mon: { exercise: 'pushups', goal: 105 } })
+  })
+
+  test('an exercise with two goals in one routine stays put, and promises nothing', { options: { progress: true } }, async ($, on) => {
+    const routine = { mon: { exercise: 'pushups', goal: 100 }, thu: { exercise: 'pushups', goal: 50 }, sun: { exercise: 'pushups', goal: 100 } }
+    expect(canProgress(routine, 'pushups')).toBe(false)
+    expect(canProgress({ mon: routine.mon, sun: routine.sun }, 'pushups')).toBe(true)
+    const { files, toasts } = world(on, new Map([[ROUTINE, JSON.stringify(routine)], [`${LOG}/2026-10-04`, '100\n']]))
+    await start($)
+    expect(routineOf(files).mon.goal).toBe(100)
+    await fit($, '100')
+    expect(toasts.some(t => t.includes('Next pushups day'))).toBe(false)
   })
 
   test('off by default: a hit changes nothing', async ($, on) => {

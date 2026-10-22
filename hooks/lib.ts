@@ -261,9 +261,17 @@ export const nextGoal = (goal: number, past: readonly Day[]) => {
   const [last, before] = past.filter(day => !day.isSkipped && day.count > 0)
   if (last === undefined || goal <= 0 || last.goal !== goal) return undefined
   if (last.count >= goal) return goal + stepFor(goal)
-  if (before !== undefined && before.goal === goal && before.count < goal) return Math.max(5, goal - stepFor(goal))
-  return undefined
+  if (before === undefined || before.goal !== goal || before.count >= goal) return undefined
+  // Never below 5, and a goal already there stays.
+  const down = Math.max(5, goal - stepFor(goal))
+  return down < goal ? down : undefined
 }
+
+// Whether an exercise's goal can move: every routine day of it at one goal. A
+// routine that sets two goals for one exercise trades sessions between them,
+// so neither is the last session of the other.
+export const canProgress = (routine: Routine, exercise: string) =>
+  new Set(Object.values(routine).filter(plan => plan.exercise === exercise).map(plan => plan.goal)).size === 1
 
 // The routine with an exercise's goal moved: only the days at the old goal, so
 // days a custom program set apart keep theirs.

@@ -60,9 +60,9 @@ A goal moves the next time its exercise comes around, at the start of that day:
 - **Two short sessions in a row:** the goal goes back one step.
 - **Anything else:** the goal stays.
 
-Only days with reps count as sessions. A rest day or a day with no reps doesn't count, so time away never lowers a goal. A day with its own goal (`/fit goal`) or its own exercise (`/fit swap`) moves nothing.
+Only days with reps count as sessions. A rest day or a day with no reps doesn't count, so time away never lowers a goal. A `/fit goal` day doesn't count toward a move. A `/fit swap` day counts for the exercise you did. A goal moves at the day's first look, before any swap.
 
-With the default rotation, 100 pushups on Monday moves Thursday and Sunday to 105 as well. Days that a custom program set to a different goal keep their own. When you hit a goal, the toast tells you the next one: *"Next pushups day: 105."* On the day it moves, a toast says so.
+With the default rotation, 100 pushups on Monday moves Thursday and Sunday to 105 as well. An exercise with two different goals in one routine (for example, 100 pushups on Monday and 50 on Thursday) doesn't progress. When you hit a goal, the toast tells you the next one: *"Next pushups day: 105."* On the day it moves, a toast says so.
 
 The new goal is written to `routine.json`. Before that, the days before today are frozen at the goals they had, so the grid still shows them as hit. `/fit progress off` stops the changes and keeps the goals where they are.
 

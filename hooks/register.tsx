@@ -18,6 +18,7 @@ import {
   setSizeFor,
   stepFor,
   buttonsWidth,
+  canProgress,
   cells,
   customRoutine,
   dayKey,
@@ -136,7 +137,7 @@ const progress = async ($: Engine, date: string) => {
   const routine = await loadRoutine($, routinePath)
   const now = await $.clock.now()
   const plan = routine[weekdayKey(now)]
-  if (plan === undefined) return
+  if (plan === undefined || !canProgress(routine, plan.exercise)) return
   const before = lastDays(now, HISTORY_DAYS).slice(0, -1).reverse()
   const days = await Promise.all(before.map(ms => readDay($, routine, logDir, ms)))
   const to = nextGoal(plan.goal, days.filter(day => day.exercise === plan.exercise))
@@ -460,7 +461,9 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
     // The routine's goal hit: say where the next session of it goes.
-    const isPlanned = progressConfig.isOn && !(await $.fs.exists(`${(await files($)).log}/${after.date}.swap`))
+    const { routine: routinePath, log: logDir } = await files($)
+    const isPlanned = progressConfig.isOn && !(await $.fs.exists(`${logDir}/${after.date}.swap`)) &&
+      canProgress(await loadRoutine($, routinePath), after.exercise)
     const next = isPlanned ? ` Next ${after.exercise} day: ${after.goal + stepFor(after.goal)}${after.unit}.` : ''
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.${next}`)
   }
