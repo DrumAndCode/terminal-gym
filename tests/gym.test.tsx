@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, cells, customRoutine, heatCells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak } from '../hooks/lib'
+import { buttonsWidth, cells, customRoutine, heatCells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak, untilText } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -641,6 +641,13 @@ test('the bands stack instead of squeezing on narrow terminals', async ($, on) =
   await narrow.unmount()
 })
 
+test('time left reads in minutes, then hours', () => {
+  expect(untilText(1)).toBe('1m')
+  expect(untilText(22.5 * 60_000)).toBe('23m')
+  expect(untilText(60 * 60_000)).toBe('1h')
+  expect(untilText(65 * 60_000)).toBe('1h 5m')
+})
+
 test('band widths follow the labels', async () => {
   expect(buttonsWidth(['Pick your training', 'Help', 'Just train'])).toBe(46)
   expect(buttonsWidth(['+5', '+10', '+25'])).toBe(22)
@@ -880,7 +887,7 @@ describe('pace', () => {
     const ran = await fit($, 'window 3')
     expect(ran.text).toContain('90 pushups left, spread over the next 3h (done by 13:00)')
     expect((await send($)).drop).toContain('(20/100 by now)')
-    expect((await fit($, '10')).text).toContain('next set 10:22')
+    expect((await fit($, '10')).text).toContain('next set in 23m')
     await clock.advance(23 * 60_000)
     expect(toasts.some(t => t.includes('⏱ Set due: 10 pushups. 30/100 by now.'))).toBe(true)
     // Off: back to 8h from the 9:00 start, where 20 done covers 10:23.
@@ -959,6 +966,17 @@ describe('pace', () => {
     expect((await send($)).drop).toBeUndefined()
   })
 
+  test('a met goal shows no next set', async ($, on) => {
+    world(on)
+    await start($)
+    await send($)
+    expect((await fit($, '100')).text).not.toContain('next set')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /100\/100 pushups/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /next set/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
   test('easy: same schedule on the band, nothing held', async ($, on) => {
     const { clock, toasts } = world(on)
     await start($)
@@ -967,7 +985,10 @@ describe('pace', () => {
     expect(await ui.find({ type: 'Text', text: /first set: 10 to start the day/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /keep prompting/ })).toBeUndefined()
     await ui.press({ key: 'add10' })
-    expect(await ui.find({ type: 'Text', text: /next set 09:53/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /next set in 54m/ })).toBeDefined()
+    // The band counts down each minute.
+    await clock.advance(60_000)
+    expect(await ui.find({ type: 'Text', text: /next set in 53m/ })).toBeDefined()
     await ui.unmount()
     await clock.advance(GAP)
     expect(toasts.some(t => t.includes('Set due'))).toBe(true)

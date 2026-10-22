@@ -13,6 +13,7 @@ import {
   bar,
   breatherMs,
   clockTime,
+  untilText,
   paceAt,
   setSizeFor,
   buttonsWidth,
@@ -53,8 +54,8 @@ const toast = ($: Engine, text: string) => $.ui.toast(text, { timeoutMs: TOAST_M
 // The pace settings, set from the options each time the module registers.
 const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
 let dueTimer: { cancel: () => void } | undefined
-// Redraws the band each minute of a breather, so "rest for 13m" counts down.
-let restTicker: { cancel: () => void } | undefined
+// Redraws the band each minute, so "rest for 13m" and "next set in 23m" count down.
+let bandTicker: { cancel: () => void } | undefined
 // Polls the log on disk, which every session and the shell script share.
 let syncTimer: { cancel: () => void } | undefined
 // The log as this session last read it: the routine's time and each day's file.
@@ -317,6 +318,8 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
     const left = paceAt(Math.max(0, t.goal - s.base), t.count - s.base, setSizeFor(t.goal, paceConfig.setSize), s.from, now, s.ms)
     next = {
       ...left,
+      // Goal met: the schedule may still hold sets, but none are due.
+      nextDueAt: t.goal > 0 && t.count >= t.goal ? null : left.nextDueAt,
       required: left.required + s.base,
       // A breather still running: catch-up reps owed, but prompts not held.
       restUntil: day.breather !== undefined && day.breather > now ? day.breather : null,
@@ -326,17 +329,27 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
     }
   }
   await update($, pace, () => next)
-  restTicker?.cancel()
-  restTicker = undefined
-  const restUntil = next?.restUntil ?? null
-  if (restUntil !== null) {
-    const tick = () => {
-      restTicker = $.clock.after(60_000, async () => {
+  bandTicker?.cancel()
+  bandTicker = undefined
+  // Only the countdowns paceText draws: "rest for 13m" and "next set in 23m".
+  const countdownTo = next === null ? null
+    : next.behind > 0 ? (next.isPutOff !== true ? next.restUntil : null)
+    : next.nextDueAt
+  if (countdownTo !== null) {
+    // Wake when the minute shown changes, so a re-arm (a sync, a prompt) never delays it.
+    // Each wait is measured from the clock, so an early timer or a sleep corrects itself.
+    const tick = (at: number) => {
+      const left = countdownTo - at
+      if (left <= 0) return
+      const timer = $.clock.after(left % 60_000 || 60_000, async () => {
         $.ui.invalidate('ui.render')
-        if ((await $.clock.now()) < restUntil) tick()
+        const at = await $.clock.now()
+        // A refreshPace while this waited has armed its own ticker: leave it be.
+        if (bandTicker === timer) tick(at)
       })
+      bandTicker = timer
     }
-    tick()
+    tick(now)
   }
   const wakeAt = Math.min(next?.nextDueAt ?? Infinity, next?.restUntil ?? Infinity)
   if (wakeAt !== Infinity && t !== null && t.count < t.goal) {
@@ -369,10 +382,10 @@ const paceText = (p: Pace | null, isStrict: boolean, now: number) => {
   if (p.isOpening === true) return `  🏁 first set: ${p.behind} to start the day`
   if (p.behind > 0 && p.restUntil !== null) {
     if (p.isPutOff === true) return `  ${p.behind} due · back at ${clockTime(p.restUntil)}`
-    return `  ${p.behind} due · rest for ${Math.max(1, Math.ceil((p.restUntil - now) / 60_000))}m`
+    return `  ${p.behind} due · rest for ${untilText(p.restUntil - now)}`
   }
   if (p.behind > 0) return `  ${p.behind} due now${isStrict ? ' · log it to keep prompting' : ''}`
-  return p.nextDueAt === null ? '' : `  next set ${clockTime(p.nextDueAt)}`
+  return p.nextDueAt === null ? '' : `  next set in ${untilText(p.nextDueAt - now)}`
 }
 
 const line = (t: Today) => {
