@@ -6,7 +6,7 @@ import {
   DEFAULT_ROUTINE,
   BARBELL,
   HELP,
-  LATER,
+  SNOOZE,
   MINI_BARBELL,
   ROUTINES,
   SIZES,
@@ -200,7 +200,7 @@ type Schedule = { from: number; ms: number; base: number }
 
 // The day's pace, kept in `<date>.day` beside its count so every session reads
 // the same one: when the day started, a `/fit window`, a breather's end, and
-// the `/fit later`s taken (how many today, and the due point the last put off).
+// the `/fit snooze`s taken (how many today, and the due point the last put off).
 type DayState = { start?: number; window?: Schedule; breather?: number; laters?: number; putOff?: number }
 
 const dayPath = async ($: Engine, date: string) => `${(await files($)).log}/${date}.day`
@@ -275,7 +275,7 @@ const startDay = async ($: Engine) => {
   if ((await dayStart($, date)) === undefined) await writeDayState($, date, s => ({ ...s, start: now }))
 }
 
-// Ends a breather, and forgets which set a `/fit later` put off: with the debt
+// Ends a breather, and forgets which set a `/fit snooze` put off: with the debt
 // cleared or the count lowered, that set is no longer the one due.
 const endBreather = ($: Engine, date: string) =>
   writeDayState($, date, ({ breather: _b, putOff: _p, ...rest }) => rest)
@@ -574,7 +574,7 @@ const boot = async ($: Engine) => {
   await $.command.register({
     name: 'fit',
     description: "Log reps toward today's goal",
-    argumentHint: '[n | set n | reset | goal n | window hours|hhmm|off | later [minutes] | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]',
+    argumentHint: '[n | snooze [min] | goal n | window hours | swap | streak | strict | easy | rules]',
     immediate: true,
   })
 }
@@ -703,7 +703,7 @@ export const register: Register = (on, options) => {
           text: `${t.goal - t.count}${t.unit} ${t.exercise} left, spread between now and ${named}. ${line(t)}${paceText(await reschedule($, t.date), isStrict, await $.clock.now())}`,
         }
       }
-      case 'later': {
+      case 'snooze': {
         // A breather with no reps logged: the set stays owed, prompts go through
         // until the time is up. Once per due set and twice a day, so strict stays strict.
         const p = await refreshPace($)
@@ -721,8 +721,8 @@ export const register: Register = (on, options) => {
         if (day.putOff === p.required) {
           return { text: `This set was already put off once. Log it, even a short one (/fit ${repSteps(p.setSize)[0] ?? p.setSize} earns a breather).` }
         }
-        if ((day.laters ?? 0) >= LATER.perDay) {
-          return { text: `That's ${LATER.perDay} put off today already. Log a set, even a short one, or /fit easy stops holding prompts.` }
+        if ((day.laters ?? 0) >= SNOOZE.perDay) {
+          return { text: `That's ${SNOOZE.perDay} put off today already. Log a set, even a short one, or /fit easy stops holding prompts.` }
         }
         const until = (await $.clock.now()) + cmd.minutes * 60_000
         await writeDayState($, t.date, s => ({ ...s, breather: until, laters: (s.laters ?? 0) + 1, putOff: p.required }))
@@ -789,7 +789,7 @@ export const register: Register = (on, options) => {
         }
       }
       return {
-        drop: `${p.behind} ${t?.exercise ?? 'reps'} due now (${p.required}/${t?.goal ?? 0} by now). /fit ${p.behind} to log it, then send your prompt. /fit later 30 puts it off; /fit easy stops holding prompts.`,
+        drop: `${p.behind} ${t?.exercise ?? 'reps'} due now (${p.required}/${t?.goal ?? 0} by now). /fit ${p.behind} to log it, then send your prompt. /fit snooze 30 puts it off; /fit easy stops holding prompts.`,
       }
     }
     return next(e)
