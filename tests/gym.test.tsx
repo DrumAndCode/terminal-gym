@@ -125,6 +125,8 @@ describe('lib', () => {
     expect(parseFit('set x').kind).toBe('error')
     expect(parseFit('dance').kind).toBe('error')
     expect(parseFit('strict')).toEqual({ kind: 'strict', isOn: true })
+    expect(parseFit('help')).toEqual({ kind: 'help' })
+    expect(parseFit('rules')).toEqual({ kind: 'help' })
     expect(parseFit('strict off')).toEqual({ kind: 'strict', isOn: false })
     expect(parseFit('window 1240')).toEqual({ kind: 'window-until', hour: 12, minute: 40 })
     expect(parseFit('window 9:05')).toEqual({ kind: 'window-until', hour: 9, minute: 5 })
