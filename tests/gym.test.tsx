@@ -966,6 +966,17 @@ describe('pace', () => {
     expect((await send($)).drop).toBeUndefined()
   })
 
+  test('a met goal shows no next set', async ($, on) => {
+    world(on)
+    await start($)
+    await send($)
+    expect((await fit($, '100')).text).not.toContain('next set')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /100\/100 pushups/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /next set/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
   test('easy: same schedule on the band, nothing held', async ($, on) => {
     const { clock, toasts } = world(on)
     await start($)

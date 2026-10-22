@@ -318,6 +318,8 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
     const left = paceAt(Math.max(0, t.goal - s.base), t.count - s.base, setSizeFor(t.goal, paceConfig.setSize), s.from, now, s.ms)
     next = {
       ...left,
+      // Goal met: the schedule may still hold sets, but none are due.
+      nextDueAt: t.goal > 0 && t.count >= t.goal ? null : left.nextDueAt,
       required: left.required + s.base,
       // A breather still running: catch-up reps owed, but prompts not held.
       restUntil: day.breather !== undefined && day.breather > now ? day.breather : null,
@@ -329,16 +331,19 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
   await update($, pace, () => next)
   bandTicker?.cancel()
   bandTicker = undefined
-  const countdownTo = next?.restUntil ?? next?.nextDueAt ?? null
+  // Only the countdowns paceText draws: "rest for 13m" and "next set in 23m".
+  const countdownTo = next === null ? null
+    : next.behind > 0 ? (next.isPutOff !== true ? next.restUntil : null)
+    : next.nextDueAt
   if (countdownTo !== null) {
     // Wake when the minute shown changes, so a re-arm (a sync, a prompt) never delays it.
+    // Each wait is measured from the clock, so an early timer or a sleep corrects itself.
     const tick = (at: number) => {
       const left = countdownTo - at
       if (left <= 0) return
-      const wait = left % 60_000 || 60_000
-      bandTicker = $.clock.after(wait, () => {
+      bandTicker = $.clock.after(left % 60_000 || 60_000, async () => {
         $.ui.invalidate('ui.render')
-        tick(at + wait)
+        tick(await $.clock.now())
       })
     }
     tick(now)
