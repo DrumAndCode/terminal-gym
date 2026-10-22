@@ -33,6 +33,12 @@
       "description": "Spread today's goal into sets from your first prompt; fall behind and prompts wait until you catch up (/fit easy turns holding off).",
       "default": false
     },
+    "progress": {
+      "type": "boolean",
+      "title": "Progressive goals",
+      "description": "Hit a goal, and the next session of that exercise goes up about 5% (in fives); two short sessions in a row step it back.",
+      "default": false
+    },
     "windowHours": {
       "type": "number",
       "title": "Training window (hours)",

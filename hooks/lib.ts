@@ -49,6 +49,7 @@ export type FitCommand =
   | { kind: 'program' }
   | { kind: 'swap'; exercise?: string }
   | { kind: 'strict'; isOn: boolean }
+  | { kind: 'progress'; isOn: boolean }
   | { kind: 'add'; n: number }
   | { kind: 'set'; n: number }
   | { kind: 'goal'; n: number }
@@ -61,7 +62,7 @@ export type FitCommand =
 // How long a set can be put off, and how often.
 export const SNOOZE = { defaultMinutes: 30, maxMinutes: 60, perDay: 2 } as const
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | snooze [minutes] | swap [exercise] | rest [off] | streak | program | help | strict | easy | reload | start | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | snooze [minutes] | swap [exercise] | rest [off] | streak | program | progress [off] | help | strict | easy | reload | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -81,6 +82,7 @@ export const parseFit = (args: string): FitCommand => {
   if (head === 'start') return { kind: 'intro' }
   if (head === 'strict') return { kind: 'strict', isOn: value !== 'off' }
   if (head === 'easy') return { kind: 'strict', isOn: false }
+  if (head === 'progress') return { kind: 'progress', isOn: value !== 'off' }
   if (head === 'set') {
     return value !== undefined && /^\d+$/.test(value)
       ? { kind: 'set', n: Number(value) }
@@ -247,6 +249,32 @@ export const parseCustom = (text: string): Routine | undefined => {
   return Number(goal) > 0 ? daily(exercise.toLowerCase(), Number(goal)) : undefined
 }
 
+// A goal's step: a twentieth (5%) in fives, at least 5.
+export const stepFor = (goal: number) => Math.max(5, Math.round(goal / 20 / 5) * 5)
+
+// Where an exercise's goal goes next, from its days before today, newest first.
+// Only days with reps count as sessions: rest days and empty days are passed
+// over. The last session must have been trained at `goal`, so a day with a goal
+// of its own (`/fit goal`) or one already counted moves nothing. A hit steps up;
+// two short sessions in a row step back. Undefined: the goal stays.
+export const nextGoal = (goal: number, past: readonly Day[]) => {
+  const [last, before] = past.filter(day => !day.isSkipped && day.count > 0)
+  if (last === undefined || goal <= 0 || last.goal !== goal) return undefined
+  if (last.count >= goal) return goal + stepFor(goal)
+  if (before !== undefined && before.goal === goal && before.count < goal) return Math.max(5, goal - stepFor(goal))
+  return undefined
+}
+
+// The routine with an exercise's goal moved: only the days at the old goal, so
+// days a custom program set apart keep theirs.
+export const moveGoal = (routine: Routine, exercise: string, from: number, to: number): Routine =>
+  Object.fromEntries(
+    Object.entries(routine).map(([day, plan]) => [
+      day,
+      plan.exercise === exercise && plan.goal === from ? { ...plan, goal: to } : plan,
+    ]),
+  )
+
 // Today's exercise, swapped: the next one in the routine, or the one named.
 export const pickSwap = (routine: Routine, current: string, wanted?: string) => {
   const plans = [...new Map(Object.values(routine).map(plan => [plan.exercise, plan])).values()]
@@ -368,6 +396,7 @@ or press a **+** button above the prompt (sized to your set)
 | \`/fit rest off\` | undo today's rest day |
 | \`/fit streak\` | streak + grid |
 | \`/fit program\` | pick your training |
+| \`/fit progress\` | hit a goal, the next session of it goes up 5% (\`off\` to stop) |
 | \`/fit strict\` / \`/fit easy\` | strict mode on / off |
 | \`/fit help\` | this list |
 | \`/fit reload\` | re-read the log now (other sessions sync every 10s anyway) |

@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, cells, customRoutine, heatCells, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, streak, untilText } from '../hooks/lib'
+import { buttonsWidth, cells, customRoutine, heatCells, moveGoal, nextGoal, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, stepFor, streak, untilText } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -1275,4 +1275,113 @@ test('a long streak is cached, so later refreshes skip the walk back', async ($,
   // The window's 28 days are re-read (three files each), plus today's own few;
   // nothing older is, which would be another 120.
   expect(calls.filter(c => c === 'fs.exists').length).toBeLessThan(28 * 3 + 12)
+})
+
+describe('progressive goals', () => {
+  const ROUTINE = `${HOME}/.claude/fitness/routine.json`
+  const routineOf = (files: Map<string, string>) => JSON.parse(files.get(ROUTINE) ?? '{}')
+  const session = (count: number, goal = 100, isSkipped = false) => ({ date: 'd', count, goal, exercise: 'pushups', isSkipped })
+
+  test('a hit steps up 5% in fives; two short sessions step back', async () => {
+    expect(stepFor(100)).toBe(5)
+    expect(stepFor(145)).toBe(5)
+    expect(stepFor(150)).toBe(10)
+    expect(stepFor(300)).toBe(15)
+    expect(stepFor(20)).toBe(5)
+    expect(nextGoal(100, [session(100)])).toBe(105)
+    expect(nextGoal(100, [session(80)])).toBeUndefined()
+    expect(nextGoal(100, [session(80), session(90)])).toBe(95)
+    // Rest days and empty days are passed over, never counted as misses.
+    expect(nextGoal(100, [session(0, 100, true), session(0), session(100)])).toBe(105)
+    expect(nextGoal(100, [session(0), session(0)])).toBeUndefined()
+    // A session at another goal (`/fit goal`, or one already counted) moves nothing.
+    expect(nextGoal(100, [session(60, 60)])).toBeUndefined()
+    expect(nextGoal(105, [session(100, 100)])).toBeUndefined()
+    expect(nextGoal(110, [session(80, 110), session(90, 105)])).toBeUndefined()
+    expect(nextGoal(5, [session(1, 5), session(2, 5)])).toBe(5)
+    expect(parseFit('progress')).toEqual({ kind: 'progress', isOn: true })
+    expect(parseFit('progress off')).toEqual({ kind: 'progress', isOn: false })
+  })
+
+  test('moving a goal leaves days a custom program set apart', async () => {
+    const routine = { mon: { exercise: 'pushups', goal: 100 }, thu: { exercise: 'pushups', goal: 50 }, tue: { exercise: 'dips', goal: 100 } }
+    expect(moveGoal(routine, 'pushups', 100, 105)).toEqual({ ...routine, mon: { exercise: 'pushups', goal: 105 } })
+  })
+
+  test('off by default: a hit changes nothing', async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-04`, '100\n']]))
+    await start($)
+    expect((await fit($, '')).text).toContain('0/100 pushups')
+    expect(files.has(`${LOG}/2026-10-04.swap`)).toBe(false)
+  })
+
+  test('the last session hit: today goes up, the days before keep theirs', { options: { progress: true } }, async ($, on) => {
+    // Sunday 2026-10-04 was the last pushups day; Saturday's squats stay out of it.
+    const { files, toasts } = world(on, new Map([[`${LOG}/2026-10-04`, '100\n'], [`${LOG}/2026-10-03`, '300\n']]))
+    await start($)
+    expect((await fit($, '')).text).toContain('0/105 pushups')
+    const routine = routineOf(files)
+    expect([routine.mon.goal, routine.thu.goal, routine.sun.goal]).toEqual([105, 105, 105])
+    expect(routine.sat).toEqual({ exercise: 'squats', goal: 300 })
+    expect(JSON.parse(files.get(`${LOG}/2026-10-04.swap`) ?? '{}')).toEqual({ exercise: 'pushups', goal: 100 })
+    expect(files.has(`${LOG}/2026-10-05.swap`)).toBe(false)
+    expect(toasts.some(t => t.includes('pushups up to 105'))).toBe(true)
+  })
+
+  test('a second session the same day moves nothing again', { options: { progress: true } }, async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-04`, '100\n']]))
+    await start($)
+    await start($)
+    expect(routineOf(files).mon.goal).toBe(105)
+    expect((await fit($, '')).text).toContain('0/105 pushups')
+  })
+
+  test('a rest day is passed over; the session before it counts', { options: { progress: true } }, async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-04.skip`, ''], [`${LOG}/2026-10-01`, '100\n']]))
+    await start($)
+    expect(routineOf(files).mon.goal).toBe(105)
+  })
+
+  test('a day with its own goal moves nothing', { options: { progress: true } }, async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-04`, '60\n'], [`${LOG}/2026-10-04.swap`, '{"exercise":"pushups","goal":60}\n']]))
+    await start($)
+    expect((await fit($, '')).text).toContain('0/100 pushups')
+    expect(routineOf(files).mon.goal).toBe(100)
+  })
+
+  test('two short sessions in a row step back', { options: { progress: true } }, async ($, on) => {
+    const { files, toasts } = world(on, new Map([[`${LOG}/2026-10-04`, '80\n'], [`${LOG}/2026-10-01`, '90\n']]))
+    await start($)
+    expect((await fit($, '')).text).toContain('0/95 pushups')
+    expect(routineOf(files).thu.goal).toBe(95)
+    expect(toasts.some(t => t.includes('back to 95'))).toBe(true)
+  })
+
+  test('days never trained are not misses', { options: { progress: true } }, async ($, on) => {
+    world(on)
+    await start($)
+    expect((await fit($, '')).text).toContain('0/100 pushups')
+  })
+
+  test('a day swapped by hand keeps its plan', { options: { progress: true } }, async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-04`, '100\n'], [`${LOG}/2026-10-05.swap`, '{"exercise":"dips","goal":100}\n']]))
+    await start($)
+    expect(routineOf(files).mon.goal).toBe(100)
+  })
+
+  test('hitting the goal says where the next session goes', { options: { progress: true } }, async ($, on) => {
+    const { toasts } = world(on)
+    await start($)
+    await fit($, '100')
+    expect(toasts.some(t => t.includes('Next pushups day: 105.'))).toBe(true)
+  })
+
+  test('/fit progress flips the setting', async ($, on) => {
+    const { config } = world(on)
+    await start($)
+    expect((await fit($, 'progress')).text).toContain('Progressive goals on')
+    expect(config.get('terminal-gym.progress')).toBe(true)
+    await fit($, 'progress off')
+    expect(config.get('terminal-gym.progress')).toBe(false)
+  })
 })
