@@ -574,7 +574,7 @@ const boot = async ($: Engine) => {
   await $.command.register({
     name: 'fit',
     description: "Log reps toward today's goal",
-    argumentHint: '[n | snooze [min] | goal n | window hours | swap | streak | strict | easy | rules]',
+    argumentHint: '[n | snooze [min] | goal n | window hours | swap | streak | strict | easy | help]',
     immediate: true,
   })
 }
@@ -741,8 +741,8 @@ export const register: Register = (on, options) => {
         return { text: `Reset. ${line(await logReps($, () => 0))}${paceText(await read($, pace), isStrict, await $.clock.now())}` }
       case 'help':
         await markIntroduced($)
-        await $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })
-        return { text: 'House rules opened · /fit hide to close' }
+        await $.ui.open({ id: HELP_PANE, title: 'HELP' })
+        return { text: 'Help opened · /fit hide to close' }
       case 'strict': {
         const { deny } = await $.config.set({ key: 'terminal-gym.strict', value: cmd.isOn })
         if (deny !== undefined) return { text: `Couldn't change strict mode: ${deny}` }
@@ -829,7 +829,7 @@ export const register: Register = (on, options) => {
     const cols = e.props.bodyColumns
     const WORDMARK = MINI_BARBELL.small + MINI_BARBELL.plate + MINI_BARBELL.name + MINI_BARBELL.plateRight + MINI_BARBELL.small
     const TAGLINE = 'Your agent put in the reps. You next.'
-    const BUTTONS_WIDTH = buttonsWidth(['Pick your training', 'House rules', 'Just train'])
+    const BUTTONS_WIDTH = buttonsWidth(['Pick your training', 'Help', 'Just train'])
     const HEADER_WIDTH = cells(WORDMARK) + 2 + cells(TAGLINE)
 
     if (!(await read($, isIntroduced))) {
@@ -837,7 +837,7 @@ export const register: Register = (on, options) => {
         <Box key="buttons" flexDirection={cols >= BUTTONS_WIDTH ? 'row' : 'column'}>
           <Button key="setup" label="Pick your training" variant="primary" onPress={() => openOnboarding($)} />
           {cols >= BUTTONS_WIDTH && <Text> </Text>}
-          <Button key="help" label="House rules" onPress={() => $.ui.open({ id: HELP_PANE, title: 'HOUSE RULES' })} />
+          <Button key="help" label="Help" onPress={() => $.ui.open({ id: HELP_PANE, title: 'HELP' })} />
           {cols >= BUTTONS_WIDTH && <Text> </Text>}
           <Button key="dismiss" label="Just train" onPress={() => markIntroduced($)} />
         </Box>
