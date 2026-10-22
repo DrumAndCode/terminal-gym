@@ -341,10 +341,13 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
     const tick = (at: number) => {
       const left = countdownTo - at
       if (left <= 0) return
-      bandTicker = $.clock.after(left % 60_000 || 60_000, async () => {
+      const timer = $.clock.after(left % 60_000 || 60_000, async () => {
         $.ui.invalidate('ui.render')
-        tick(await $.clock.now())
+        const at = await $.clock.now()
+        // A refreshPace while this waited has armed its own ticker: leave it be.
+        if (bandTicker === timer) tick(at)
       })
+      bandTicker = timer
     }
     tick(now)
   }
