@@ -71,7 +71,7 @@ Every Claude Code session reads the same log in `~/.claude/fitness`, so a set yo
 | `/fit streak` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
 | `/fit program` | pick your program (the walkthrough), or **Custom goals** to type each exercise's daily goal |
 | `/fit strict` / `/fit easy` | strict mode on / off |
-| `/fit rules` | house rules |
+| `/fit help` | every command + strict-mode rules (`/fit rules` still works) |
 | `/fit reload` | re-read today's log from disk now (`/fit sync` works too) |
 | `/fit start` | replay the welcome |
 | `/fit hide` | close panels |
@@ -115,7 +115,7 @@ A mod runs inside Claude Code, so here is everything Terminal Gym touches:
   - `session.start` and the SessionStart event after `/clear` or `/resume`: load today's state and register `/fit`. The event passes through unchanged.
   - `turn.start` and `turn.complete`: time the easy-mode nudge and refresh the band.
   - a timer every 10 seconds: lists `~/.claude/fitness/log` and re-reads it when a file changed, so sessions stay in step.
-  - `ui.render`: draws the band, the scoreboard, the house rules and the walkthrough, and (easy mode) the suggested set in the spinner.
+  - `ui.render`: draws the band, the scoreboard, the help pane and the walkthrough, and (easy mode) the suggested set in the spinner.
 
 ## Requirements
 

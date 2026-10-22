@@ -368,13 +368,13 @@ describe('first run', () => {
     await ui.unmount()
   })
 
-  test('/fit rules opens a help pane with its own close button', async ($, on) => {
+  test('/fit help opens a help pane with its own close button', async ($, on) => {
     const { open } = world(on)
     await start($)
-    await fit($, 'rules')
+    await fit($, 'help')
     expect(open.has('gym-help')).toBe(true)
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, requestId: 'gym-help' })
-    expect(await ui.find({ type: 'Markdown', text: /House rules/ })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: /\/fit help/ })).toBeDefined()
     await ui.press({ key: 'close' })
     expect(open.has('gym-help')).toBe(false)
   })
@@ -640,7 +640,7 @@ test('the bands stack instead of squeezing on narrow terminals', async ($, on) =
 })
 
 test('band widths follow the labels', async () => {
-  expect(buttonsWidth(['Pick your training', 'House rules', 'Just train'])).toBe(53)
+  expect(buttonsWidth(['Pick your training', 'Help', 'Just train'])).toBe(46)
   expect(buttonsWidth(['+5', '+10', '+25'])).toBe(22)
   expect(cells('✅ 💪 🔥')).toBe(8)
 })
@@ -678,11 +678,11 @@ test('the welcome band changes layout with width', async ($, on) => {
     await ui.unmount()
     return dirs
   }
-  expect(await layout(111)).toEqual(['row', 'row', 'row'])
-  expect(await layout(110)).toEqual(['column', 'row', 'row'])
+  expect(await layout(104)).toEqual(['row', 'row', 'row'])
+  expect(await layout(103)).toEqual(['column', 'row', 'row'])
   expect(await layout(57)).toEqual(['column', 'row', 'row'])
   expect(await layout(56)).toEqual(['column', 'column', 'row'])
-  expect(await layout(52)).toEqual(['column', 'column', 'column'])
+  expect(await layout(45)).toEqual(['column', 'column', 'column'])
 })
 
 test('the band wordmark is a mini barbell', async ($, on) => {

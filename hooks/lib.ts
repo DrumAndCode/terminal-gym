@@ -61,7 +61,7 @@ export type FitCommand =
 // How long a set can be put off, and how often.
 export const SNOOZE = { defaultMinutes: 30, maxMinutes: 60, perDay: 2 } as const
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | snooze [minutes] | swap [exercise] | rest [off] | streak | program | rules | strict | easy | reload | start | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | snooze [minutes] | swap [exercise] | rest [off] | streak | program | help | strict | easy | reload | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
@@ -74,7 +74,7 @@ export const parseFit = (args: string): FitCommand => {
     const name = args.trim().replace(/^swap\s*/, '').replace(/\s+/g, ' ').toLowerCase()
     return name === '' ? { kind: 'swap' } : { kind: 'swap', exercise: name }
   }
-  if (head === 'rules') return { kind: 'help' }
+  if (head === 'help' || head === 'rules') return { kind: 'help' }
   if (head === 'hide') return { kind: 'hide' }
   if (head === 'reload' || head === 'sync') return { kind: 'reload' }
   if (head === 'reset') return { kind: 'reset' }
@@ -337,7 +337,7 @@ export const clockTime = (ms: number) => {
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
-export const HELP = `## House rules
+export const HELP = `## Help
 
 **Your agent put in the reps. You next.**
 When a turn runs long, drop and do a set.
@@ -361,7 +361,7 @@ or press a **+** button above the prompt (sized to your set)
 | \`/fit streak\` | streak + grid |
 | \`/fit program\` | pick your training |
 | \`/fit strict\` / \`/fit easy\` | strict mode on / off |
-| \`/fit rules\` | these rules |
+| \`/fit help\` | this list |
 | \`/fit reload\` | re-read the log now (other sessions sync every 10s anyway) |
 | \`/fit start\` | replay the welcome |
 | \`/fit hide\` | close panels |
