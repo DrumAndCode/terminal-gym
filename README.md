@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 
 ## What you get
 
-- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set 10:53  log reps: [ +5 ] [ +10 ] [ +20 ]  🔥3d`. The buttons follow your set size: a 300-squat day shows +10 +20 +30. It's grey at 0, yellow once you start, and green as you close in on the goal.
+- **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set in 23m  log reps: [ +5 ] [ +10 ] [ +20 ]  🔥3d`. The buttons follow your set size: a 300-squat day shows +10 +20 +30. It's grey at 0, yellow once you start, and green as you close in on the goal.
 - **Walkthrough**: three steps on first run: what the mod does, pick your program, how streaks and the scoreboard work.
 - **Set reminders**: a toast when each set comes due.
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
@@ -32,7 +32,7 @@ Strict mode spreads today's goal into evenly spaced sets over a training window 
 | When | What happens |
 |---|---|
 | First prompt (say 9:00) | The day starts and the opening set is due. Your prompt waits: *"Start the day with a set: 10 pushups. /fit 10 to log it, then send your prompt."* |
-| After `/fit 10` | You're through. The band reads `next set 09:53` |
+| After `/fit 10` | You're through. The band reads `next set in 54m`, counting down |
 | 9:53 | Toast: *"⏱ Set due: 10 pushups. 20/100 by now."* Your next prompt waits until you log it |
 | …about every 53 minutes… | Ten sets in all, the last due 8 hours after your first prompt |
 | Goal done, or a rest day | Nothing waits |

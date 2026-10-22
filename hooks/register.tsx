@@ -13,6 +13,7 @@ import {
   bar,
   breatherMs,
   clockTime,
+  untilText,
   paceAt,
   setSizeFor,
   buttonsWidth,
@@ -53,8 +54,8 @@ const toast = ($: Engine, text: string) => $.ui.toast(text, { timeoutMs: TOAST_M
 // The pace settings, set from the options each time the module registers.
 const paceConfig = { setSize: 0, windowMs: 8 * HOUR_MS }
 let dueTimer: { cancel: () => void } | undefined
-// Redraws the band each minute of a breather, so "rest for 13m" counts down.
-let restTicker: { cancel: () => void } | undefined
+// Redraws the band each minute, so "rest for 13m" and "next set in 23m" count down.
+let bandTicker: { cancel: () => void } | undefined
 // Polls the log on disk, which every session and the shell script share.
 let syncTimer: { cancel: () => void } | undefined
 // The log as this session last read it: the routine's time and each day's file.
@@ -326,17 +327,21 @@ const refreshPace = async ($: Engine): Promise<Pace | null> => {
     }
   }
   await update($, pace, () => next)
-  restTicker?.cancel()
-  restTicker = undefined
-  const restUntil = next?.restUntil ?? null
-  if (restUntil !== null) {
-    const tick = () => {
-      restTicker = $.clock.after(60_000, async () => {
+  bandTicker?.cancel()
+  bandTicker = undefined
+  const countdownTo = next?.restUntil ?? next?.nextDueAt ?? null
+  if (countdownTo !== null) {
+    // Wake when the minute shown changes, so a re-arm (a sync, a prompt) never delays it.
+    const tick = (at: number) => {
+      const left = countdownTo - at
+      if (left <= 0) return
+      const wait = left % 60_000 || 60_000
+      bandTicker = $.clock.after(wait, () => {
         $.ui.invalidate('ui.render')
-        if ((await $.clock.now()) < restUntil) tick()
+        tick(at + wait)
       })
     }
-    tick()
+    tick(now)
   }
   const wakeAt = Math.min(next?.nextDueAt ?? Infinity, next?.restUntil ?? Infinity)
   if (wakeAt !== Infinity && t !== null && t.count < t.goal) {
@@ -369,10 +374,10 @@ const paceText = (p: Pace | null, isStrict: boolean, now: number) => {
   if (p.isOpening === true) return `  🏁 first set: ${p.behind} to start the day`
   if (p.behind > 0 && p.restUntil !== null) {
     if (p.isPutOff === true) return `  ${p.behind} due · back at ${clockTime(p.restUntil)}`
-    return `  ${p.behind} due · rest for ${Math.max(1, Math.ceil((p.restUntil - now) / 60_000))}m`
+    return `  ${p.behind} due · rest for ${untilText(p.restUntil - now)}`
   }
   if (p.behind > 0) return `  ${p.behind} due now${isStrict ? ' · log it to keep prompting' : ''}`
-  return p.nextDueAt === null ? '' : `  next set ${clockTime(p.nextDueAt)}`
+  return p.nextDueAt === null ? '' : `  next set in ${untilText(p.nextDueAt - now)}`
 }
 
 const line = (t: Today) => {
