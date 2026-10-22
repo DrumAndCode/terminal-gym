@@ -460,10 +460,11 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   }
   await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
-    // The routine's goal hit: say where the next session of it goes.
-    const { routine: routinePath, log: logDir } = await files($)
-    const isPlanned = progressConfig.isOn && !(await $.fs.exists(`${logDir}/${after.date}.swap`)) &&
-      canProgress(await loadRoutine($, routinePath), after.exercise)
+    // The routine's goal hit, by the rule `nextGoal` moves it on: say where the
+    // next session of it goes. A swap counts; a goal of its own does not.
+    const routine = await loadRoutine($, (await files($)).routine)
+    const isPlanned = progressConfig.isOn && canProgress(routine, after.exercise) &&
+      Object.values(routine).some(plan => plan.exercise === after.exercise && plan.goal === after.goal)
     const next = isPlanned ? ` Next ${after.exercise} day: ${after.goal + stepFor(after.goal)}${after.unit}.` : ''
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.${next}`)
   }

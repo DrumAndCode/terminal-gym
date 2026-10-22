@@ -1390,6 +1390,23 @@ describe('progressive goals', () => {
     expect(toasts.some(t => t.includes('Next pushups day: 105.'))).toBe(true)
   })
 
+  test('a swap day promises the next session; a goal of its own does not', { options: { progress: true } }, async ($, on) => {
+    const { toasts } = world(on)
+    await start($)
+    await fit($, 'swap dips')
+    await fit($, '100')
+    expect(toasts.some(t => t.includes('Next dips day: 105.'))).toBe(true)
+    await fit($, 'goal 120')
+    await fit($, '20')
+    expect(toasts.some(t => t.includes('Next dips day: 125'))).toBe(false)
+  })
+
+  test('a /fit goal day at the routine goal counts like any other', { options: { progress: true } }, async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-04`, '100\n'], [`${LOG}/2026-10-04.swap`, '{"exercise":"pushups","goal":100}\n']]))
+    await start($)
+    expect(routineOf(files).mon.goal).toBe(105)
+  })
+
   test('/fit progress flips the setting', async ($, on) => {
     const { config } = world(on)
     await start($)
