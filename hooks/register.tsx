@@ -16,7 +16,9 @@ import {
   untilText,
   paceAt,
   setSizeFor,
+  stepFor,
   buttonsWidth,
+  canProgress,
   cells,
   customRoutine,
   dayKey,
@@ -27,6 +29,8 @@ import {
   GRID_COLORS,
   heatCells,
   lastDays,
+  moveGoal,
+  nextGoal,
   parseFit,
   pickSwap,
   progressColor,
@@ -60,6 +64,10 @@ let bandTicker: { cancel: () => void } | undefined
 let syncTimer: { cancel: () => void } | undefined
 // The log as this session last read it: the routine's time and each day's file.
 let seenOnDisk = ''
+// Progressive goals, set from the options; and the day this session last moved
+// a goal for, so the check runs once a day.
+const progressConfig = { isOn: false }
+let progressedOn = ''
 
 const today = atom({ plugin: 'terminal-gym', key: 'today' } as const, null)
 const olderStreak = atom({ plugin: 'terminal-gym', key: 'olderStreak' } as const, 0)
@@ -116,9 +124,36 @@ const readSwap = async ($: Engine, logDir: string, date: string): Promise<Routin
 const readRest = async ($: Engine, path: string) =>
   (await $.fs.exists(path)) && (await $.fs.read(path)).trim() !== 'off'
 
+// Progressive goals: at the day's first look, today's exercise moves on from
+// its last sessions, the next time it comes around. Days before are frozen at
+// the goals they were trained at first. Two sessions at once compute the same
+// move, and the second finds the routine already moved, so a goal moves once.
+const progress = async ($: Engine, date: string) => {
+  if (!progressConfig.isOn || progressedOn === date) return
+  progressedOn = date
+  const { routine: routinePath, log: logDir } = await files($)
+  // A day with a plan of its own (`/fit swap`, `/fit goal`) isn't the routine's.
+  if (await $.fs.exists(`${logDir}/${date}.swap`)) return
+  const routine = await loadRoutine($, routinePath)
+  const now = await $.clock.now()
+  const plan = routine[weekdayKey(now)]
+  if (plan === undefined || !canProgress(routine, plan.exercise)) return
+  const before = lastDays(now, HISTORY_DAYS).slice(0, -1).reverse()
+  const days = await Promise.all(before.map(ms => readDay($, routine, logDir, ms)))
+  const to = nextGoal(plan.goal, days.filter(day => day.exercise === plan.exercise))
+  if (to === undefined) return
+  await freezePastDays($, routine)
+  await $.fs.write(routinePath, `${JSON.stringify(moveGoal(routine, plan.exercise, plan.goal, to), null, 2)}\n`)
+  const unit = plan.unit ?? ''
+  toast($, to > plan.goal
+    ? `📈 ${plan.exercise} up to ${to}${unit}: your last session hit ${plan.goal}${unit}.`
+    : `${plan.exercise} back to ${to}${unit} after two short sessions. Rebuild.`)
+}
+
 const refreshToday = async ($: Engine): Promise<Today> => {
   const { routine, log: logDir } = await files($)
   const date = dayKey(await $.clock.now())
+  await progress($, date)
   const plan =
     (await readSwap($, logDir, date)) ?? (await loadRoutine($, routine))[weekdayKey(await $.clock.now())]
   const next: Today = {
@@ -425,7 +460,12 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   }
   await refreshPace($)
   if (after.goal > 0 && before.count < after.goal && count >= after.goal) {
-    toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.`)
+    // The routine's goal hit: say where the next session of it goes.
+    const { routine: routinePath, log: logDir } = await files($)
+    const isPlanned = progressConfig.isOn && !(await $.fs.exists(`${logDir}/${after.date}.swap`)) &&
+      canProgress(await loadRoutine($, routinePath), after.exercise)
+    const next = isPlanned ? ` Next ${after.exercise} day: ${after.goal + stepFor(after.goal)}${after.unit}.` : ''
+    toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.${next}`)
   }
   return after
 }
@@ -571,6 +611,8 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
 const boot = async ($: Engine) => {
   const introduced = (await $.store.get('introduced')) === true
   await update($, isIntroduced, () => introduced)
+  // A new conversation looks again: the routine may have moved since.
+  progressedOn = ''
   await refreshToday($)
   await refreshHistory($)
   // Re-arms the due timer, which a restart or reload drops.
@@ -598,6 +640,7 @@ export const register: Register = (on, options) => {
   // Whole reps only: a fractional set would make fractional buttons.
   paceConfig.setSize = Math.max(0, Math.round(Number(options.setSize ?? 0)) || 0)
   paceConfig.windowMs = Math.max(1, Number(options.windowHours ?? 8)) * HOUR_MS
+  progressConfig.isOn = options.progress === true
   let timer: { cancel: () => void } | undefined
 
   on('session.start', async ($, e, next) => {
@@ -763,6 +806,15 @@ export const register: Register = (on, options) => {
           text: cmd.isOn
             ? `Coach is strict. Today's goal is spread into sets over ${paceConfig.windowMs / HOUR_MS}h from your first prompt; fall behind and prompts wait until you catch up.`
             : 'Coach is easy. Same schedule on the band, nudges only, nothing held.',
+        }
+      }
+      case 'progress': {
+        const { deny } = await $.config.set({ key: 'terminal-gym.progress', value: cmd.isOn })
+        if (deny !== undefined) return { text: `Couldn't change progressive goals: ${deny}` }
+        return {
+          text: cmd.isOn
+            ? 'Progressive goals on. Hit a goal, and the next session of that exercise is about 5% more. Two short sessions in a row step it back.'
+            : 'Progressive goals off. Goals stay where they are now.',
         }
       }
       case 'hide':

@@ -23,6 +23,7 @@ https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
 - **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
 - **Scoreboard** (`/fit streak`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.
+- **Progressive goals** (opt-in): hit a goal, and the next session of that exercise asks for about 5% more.
 - **Streaks**: count every day you log any reps, for as long as you keep it going. A day with none, or a rest day, resets it. The grid still marks the days you hit the full goal.
 
 ## How a strict day works
@@ -49,6 +50,22 @@ Only prompts you type can be held. Background tasks, `/loop` runs, messages from
 
 Easy mode (the default) shows the same schedule on the band and the same reminders, but never holds a prompt.
 
+## Progressive goals
+
+Turn them on with `/fit progress`, or with *Progressive goals* in `/config`. They are off by default.
+
+A goal moves the next time its exercise comes around, at the start of that day:
+
+- **You hit the goal:** the goal goes up one step. A step is 5% of the goal in fives, at least 5. For example, 100 → 105 and 300 → 315. From 150, a step is 10.
+- **Two short sessions in a row:** the goal goes back one step.
+- **Anything else:** the goal stays.
+
+Only days with reps count as sessions. A rest day or a day with no reps doesn't count, so time away never lowers a goal. A `/fit goal` day doesn't count toward a move. A `/fit swap` day counts for the exercise you did. A goal moves at the day's first look, before any swap.
+
+With the default rotation, 100 pushups on Monday moves Thursday and Sunday to 105 as well. An exercise with two different goals in one routine (for example, 100 pushups on Monday and 50 on Thursday) doesn't progress. When you hit a goal, the toast tells you the next one: *"Next pushups day: 105."* On the day it moves, a toast says so.
+
+The new goal is written to `routine.json`. Before that, the days before today are frozen at the goals they had, so the grid still shows them as hit. `/fit progress off` stops the changes and keeps the goals where they are.
+
 ## Several sessions at once
 
 Every Claude Code session reads the same log in `~/.claude/fitness`, so a set you log in one counts in all of them. Each session checks the log every 10 seconds and redraws its band when another session, or the shell, wrote to it. `/fit reload` does the same read right away.
@@ -70,6 +87,7 @@ Every Claude Code session reads the same log in `~/.claude/fitness`, so a set yo
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
 | `/fit streak` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
 | `/fit program` | pick your program (the walkthrough), or **Custom goals** to type each exercise's daily goal |
+| `/fit progress` | progressive goals on (`/fit progress off` to stop) |
 | `/fit strict` / `/fit easy` | strict mode on / off |
 | `/fit help` | every command + strict-mode rules (`/fit rules` still works) |
 | `/fit reload` | re-read today's log from disk now (`/fit sync` works too) |
@@ -83,6 +101,7 @@ In `/config`, under terminal-gym:
 | Setting | Default | What it does |
 |---|---|---|
 | Strict mode | off | Hold typed prompts while you're behind pace |
+| Progressive goals | off | Raise an exercise's goal after you hit it, and lower it after two short sessions |
 | Training window | 8 hours | How long after your first prompt the day's sets are spread over |
 | Set size | auto | Reps per set; auto is a tenth of the goal, rounded to fives |
 | Long-turn nudges | on | Easy mode: suggest a set when a turn runs long |
@@ -95,7 +114,7 @@ In `/config`, under terminal-gym:
 
 The mod makes no network calls and adds no hidden context for the model. `/fit` replies appear in your conversation like any slash command's output, so Claude can see them. Everything else stays on your machine: a few values in the mod's own store (see below), and your data in `~/.claude/fitness`:
 
-- `routine.json`: the plan per weekday, for example `{ "mon": { "exercise": "pushups", "goal": 100 } }`, with an optional `"unit": "s"` for timed exercises. Edit it for a custom program.
+- `routine.json`: the plan per weekday, for example `{ "mon": { "exercise": "pushups", "goal": 100 } }`, with an optional `"unit": "s"` for timed exercises. Edit it for a custom program. With progressive goals on, the mod changes the goals in it.
 - `log/YYYY-MM-DD`: that day's count.
 - `log/YYYY-MM-DD.skip`: a rest day. If it contains `off`, the rest day was undone.
 - `log/YYYY-MM-DD.swap`: that day's plan after `/fit swap` or `/fit goal`, in the same shape as a routine day.
@@ -105,9 +124,9 @@ The mod makes no network calls and adds no hidden context for the model. `/fit` 
 
 A mod runs inside Claude Code, so here is everything Terminal Gym touches:
 
-- **Files it writes:** only its own data in `~/.claude/fitness`: the routine, the daily logs listed above, and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
+- **Files it writes:** only its own data in `~/.claude/fitness`: the routine (also when progressive goals move a goal), the daily logs listed above, and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
 - **Its own store:** two values in the mod's per-plugin store inside Claude Code: the streak cache and whether you've seen the welcome. Everything sessions share (today's start, a `/fit window`, a breather) is in the day's file above, so every session reads the same one.
-- **Settings it changes:** `/fit strict` and `/fit easy` turn its own *Strict mode* setting (`terminal-gym.strict`) on and off. That's the only setting it changes. It sets no environment variables; it reads `HOME` to find `~/.claude/fitness`.
+- **Settings it changes:** `/fit strict` and `/fit easy` turn its own *Strict mode* setting (`terminal-gym.strict`) on and off. `/fit progress` does the same for its *Progressive goals* setting (`terminal-gym.progress`). Those are the only settings it changes. It sets no environment variables; it reads `HOME` to find `~/.claude/fitness`.
 - **Permissions:** it never approves or denies a tool call, never changes your permission mode, and never runs a model or a process.
 - **Events it hooks:**
   - `prompt.submit`: in strict mode, holds a prompt you typed while you're behind pace and puts its text back in the prompt box. Easy mode lets everything through. Prompts from other sources are never touched.
