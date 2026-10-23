@@ -11,7 +11,7 @@ import {
   ROUTINES,
   SIZES,
   bar,
-  breatherMs,
+  earnedBreatherMs,
   clockTime,
   untilText,
   paceAt,
@@ -446,15 +446,16 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   )
 
   // A set that still leaves reps owed earns a breather before the rest: a short
-  // one counts, down to the band's smallest button. Clearing the debt or
-  // lowering the count ends one, so later sets aren't hidden.
+  // one counts, and fewer reps than the band's smallest button earn a shorter
+  // one. Clearing the debt or lowering the count ends one, so later sets aren't hidden.
   const added = count - before.count
   const stillOwed = owed === null ? 0 : owed.behind - added
   const s = await schedule($, after.date)
-  if (owed !== null && s !== undefined && stillOwed > 0 && added > 0 && added >= (repSteps(owed.setSize)[0] ?? owed.setSize)) {
-    const until = (await $.clock.now()) + breatherMs(after.goal - s.base, owed.setSize, s.ms)
-    // Reps earned this breather, so it's no longer the set that was put off.
-    await writeDayState($, after.date, ({ putOff: _, ...state }) => ({ ...state, breather: until }))
+  if (owed !== null && s !== undefined && stillOwed > 0 && added > 0) {
+    const until = (await $.clock.now()) + earnedBreatherMs(added, after.goal - s.base, owed.setSize, s.ms)
+    // Reps earned this breather, so it's no longer the set that was put off. A
+    // few reps never cut short a longer breather or put-off already running.
+    await writeDayState($, after.date, ({ putOff: _, ...state }) => ({ ...state, breather: Math.max(state.breather ?? 0, until) }))
   } else if (stillOwed <= 0 || added < 0) {
     await endBreather($, after.date)
   }

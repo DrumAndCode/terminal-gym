@@ -1051,12 +1051,23 @@ describe('pace', () => {
     expect((await send($)).drop).toBeUndefined()
   })
 
-  test('strict: less than the smallest button, or clearing the debt, earns no breather', { options: { strict: true } }, async ($, on) => {
+  test('strict: fewer reps than the smallest button earn a shorter breather', { options: { strict: true } }, async ($, on) => {
+    const { clock, toasts } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
+    await start($)
+    // 2 of the 5-rep button: two fifths of the 27m breather, about 11m.
+    expect((await fit($, '2')).text).toContain('18 due · rest for 11m')
+    expect((await send($)).drop).toBeUndefined()
+    // One more rep never cuts the breather short.
+    expect((await fit($, '1')).text).toContain('17 due · rest for 11m')
+    await clock.advance((GAP / 2) * (2 / 5) + 1_000)
+    expect(toasts.some(t => t.includes('⏱ Set due: 17 pushups'))).toBe(true)
+    expect((await send($)).drop).toContain('17 pushups due now')
+  })
+
+  test('strict: clearing the debt earns no breather', { options: { strict: true } }, async ($, on) => {
     world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
     await start($)
-    await fit($, '4')
-    expect((await send($)).drop).toContain('16 pushups due now')
-    await fit($, '16')
+    await fit($, '20')
     expect((await send($)).drop).toBeUndefined()
     expect((await fit($, '')).text).not.toContain('rest for')
   })
