@@ -201,7 +201,7 @@ describe('logging', () => {
     await fit($, '10')
     const cheers = toasts.filter(t => t.startsWith('💪 +10 pushups.'))
     expect(cheers.length).toBe(2)
-    // The line turns with the count.
+    // The line turns with the set number.
     expect(cheers[0]).not.toBe(cheers[1])
 
     toasts.length = 0
