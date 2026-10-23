@@ -20,6 +20,7 @@ https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 - **Tracker band** above the prompt: `💪 ▓▓▓▓▓▓░░░░ 60/100 pushups  next set in 23m  log reps: [ +5 ] [ +10 ] [ +20 ]  🔥3d`. The buttons follow your set size: a 300-squat day shows +10 +20 +30. It's grey at 0, yellow once you start, and green as you close in on the goal.
 - **Walkthrough**: three steps on first run: what the mod does, pick your program, how streaks and the scoreboard work.
 - **Set reminders**: a toast when each set comes due.
+- **Cheers**: a toast for every set you log, with the reps left to go.
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
 - **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
 - **Scoreboard** (`/fit streak`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.

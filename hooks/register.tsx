@@ -20,6 +20,7 @@ import {
   buttonsWidth,
   canProgress,
   cells,
+  cheer,
   customRoutine,
   dayKey,
   exerciseGoals,
@@ -475,6 +476,8 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
       Object.values(routine).some(plan => plan.exercise === after.exercise && plan.goal === after.goal)
     const next = isPlanned ? ` Next ${after.exercise} day: ${after.goal + stepFor(after.goal)}${after.unit}.` : ''
     toast($, `✅ Done. ${count}/${after.goal}${after.unit} ${after.exercise}. That's the work.${next}`)
+  } else if (added > 0) {
+    toast($, cheer(added, count, after.goal, after.exercise, after.unit))
   }
   return after
 }

@@ -184,10 +184,30 @@ describe('logging', () => {
     expect(ran.text).toContain('60/100 pushups')
     expect(files.get(`${LOG}/2026-10-05`)).toBe('60\n')
     expect(files.has(`${HOME}/.claude/fitness/routine.json`)).toBe(true)
+    expect(toasts.some(t => t.startsWith('💪 +60 pushups.') && t.endsWith('40 to go.'))).toBe(true)
 
+    toasts.length = 0
     await fit($, '40')
     expect(files.get(`${LOG}/2026-10-05`)).toBe('100\n')
     expect(toasts.some(t => t.includes("That's the work"))).toBe(true)
+    // The goal's own toast, not a cheer as well.
+    expect(toasts.some(t => t.startsWith('💪'))).toBe(false)
+  })
+
+  test('a set short of the goal gets a cheer; a lowered count does not', async ($, on) => {
+    const { toasts } = world(on)
+    await start($)
+    await fit($, '10')
+    await fit($, '10')
+    const cheers = toasts.filter(t => t.startsWith('💪 +10 pushups.'))
+    expect(cheers.length).toBe(2)
+    // The line turns with the count.
+    expect(cheers[0]).not.toBe(cheers[1])
+
+    toasts.length = 0
+    await fit($, '-5')
+    await fit($, 'reset')
+    expect(toasts.some(t => t.startsWith('💪'))).toBe(false)
   })
 
   test('/fit reads counts the shell script already wrote', async ($, on) => {
