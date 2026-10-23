@@ -454,8 +454,13 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   if (owed !== null && s !== undefined && stillOwed > 0 && added > 0) {
     const until = (await $.clock.now()) + earnedBreatherMs(added, after.goal - s.base, owed.setSize, s.ms)
     // Reps earned this breather, so it's no longer the set that was put off. A
-    // few reps never cut short a longer breather or put-off already running.
-    await writeDayState($, after.date, ({ putOff: _, ...state }) => ({ ...state, breather: Math.max(state.breather ?? 0, until) }))
+    // few reps never cut short a longer breather or put-off already running: a
+    // put-off that still ends later keeps its hold and its mark.
+    await writeDayState($, after.date, state => {
+      if (state.breather !== undefined && state.breather > until) return state
+      const { putOff: _, ...rest } = state
+      return { ...rest, breather: until }
+    })
   } else if (stillOwed <= 0 || added < 0) {
     await endBreather($, after.date)
   }

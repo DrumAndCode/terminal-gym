@@ -1136,6 +1136,16 @@ describe('pace', () => {
     expect((await fit($, 'snooze')).text).toContain("That's 2 put off today already")
   })
 
+  test('strict: a rep or two during /fit snooze keeps the put-off', { options: { strict: true } }, async ($, on) => {
+    const { clock } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
+    await start($)
+    await fit($, 'snooze 30')
+    // 1 rep earns about 5m, short of the 30m put-off: the put-off stands, still marked.
+    expect((await fit($, '1')).text).toContain('19 due · back at 09:30')
+    await clock.advance(30 * 60_000 + 1_000)
+    expect((await fit($, 'snooze')).text).toContain('already put off once')
+  })
+
   test('/fit snooze needs a set that is due', { options: { strict: true } }, async ($, on) => {
     world(on, new Map([[`${LOG}/2026-10-05`, '10\n'], [`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - 60_000 })]]))
     await start($)
