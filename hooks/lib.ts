@@ -365,6 +365,14 @@ export const paceAt = (
 export const breatherMs = (goal: number, setSize: number, windowMs: number) =>
   goal <= 0 || setSize <= 0 ? 0 : setGap(goal, setSize, windowMs) / 2
 
+// Fewer reps than the band's smallest button earn their share of the breather:
+// 2 of a 5-rep button, two fifths. A full button or more earns it all.
+export const earnedBreatherMs = (added: number, goal: number, setSize: number, windowMs: number) => {
+  if (added <= 0) return 0
+  const smallest = repSteps(setSize)[0] ?? setSize
+  return breatherMs(goal, setSize, windowMs) * Math.min(1, added / Math.max(1, smallest))
+}
+
 // Time left, rounded up to the minute: "23m", "1h", "1h 5m".
 export const untilText = (ms: number) => {
   const minutes = Math.max(1, Math.ceil(ms / 60_000))
@@ -418,7 +426,7 @@ Off by default. When it's on:
 - prompts before 5am count as the night before
 - the first set is due right away
 - fall behind and your prompts wait until you catch up
-- log a set, even a short one, and you get a breather before the rest
+- log a set, even a short one, and you get a breather before the rest (a few reps buy a shorter one)
 - just eaten? \`/fit snooze 30\` puts the due set off, once per set and twice a day
 - a toast tells you when each set comes due
 - \`/fit easy\` stops holding prompts; \`/fit rest\` (before any reps) takes the day off

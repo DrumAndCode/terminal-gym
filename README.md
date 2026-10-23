@@ -38,7 +38,7 @@ Strict mode spreads today's goal into evenly spaced sets over a training window 
 | …about every 53 minutes… | Ten sets in all, the last due 8 hours after your first prompt |
 | Goal done, or a rest day | Nothing waits |
 
-You don't have to pay a debt back all at once. Log a set, even a short one (at least the band's smallest button), and you earn a breather of half the gap between sets (about 26 minutes with the defaults): prompts go through, the band reads `10 due · rest for 27m`, and a toast calls the next set when it ends. What you didn't do stays owed. Log less than the smallest button and your prompts still wait.
+You don't have to pay a debt back all at once. Log a set, even a short one, and you earn a breather of half the gap between sets (about 27 minutes with the defaults): prompts go through, the band reads `10 due · rest for 27m`, and a toast calls the next set when it ends. What you didn't do stays owed. Fewer reps than the band's smallest button earn their share of it: 2 reps of a 5-rep button get about 11 minutes. A few reps never cut short a longer breather or snooze already running.
 
 A held prompt goes back in the prompt box, so you can send it again once you've logged the set.
 
