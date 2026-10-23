@@ -453,13 +453,15 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   const s = await schedule($, after.date)
   if (owed !== null && s !== undefined && stillOwed > 0 && added > 0) {
     const until = (await $.clock.now()) + earnedBreatherMs(added, after.goal - s.base, owed.setSize, s.ms)
-    // Reps earned this breather, so it's no longer the set that was put off. A
-    // few reps never cut short a longer breather or put-off already running: a
-    // put-off that still ends later keeps its hold and its mark.
+    const isFullSet = added >= (repSteps(owed.setSize)[0] ?? owed.setSize)
+    // Reps never cut short a longer breather or put-off already running. A
+    // full set means it's no longer the set that was put off; a few reps under
+    // a put-off that ends later leave its hold and its mark alone.
     await writeDayState($, after.date, state => {
-      if (state.breather !== undefined && state.breather > until) return state
+      const isLater = state.breather !== undefined && state.breather > until
+      if (isLater && !isFullSet) return state
       const { putOff: _, ...rest } = state
-      return { ...rest, breather: until }
+      return { ...rest, breather: isLater ? state.breather : until }
     })
   } else if (stillOwed <= 0 || added < 0) {
     await endBreather($, after.date)

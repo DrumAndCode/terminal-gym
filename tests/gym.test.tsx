@@ -1146,6 +1146,17 @@ describe('pace', () => {
     expect((await fit($, 'snooze')).text).toContain('already put off once')
   })
 
+  test('strict: a full set during a longer /fit snooze keeps the hold but clears the put-off', { options: { strict: true } }, async ($, on) => {
+    const { clock } = world(on, new Map([[`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - GAP })]]))
+    await start($)
+    await fit($, 'snooze 30')
+    // 5 reps earn the full 27m breather; the 30m hold stands, now as rest.
+    expect((await fit($, '5')).text).toContain('15 due · rest for 30m')
+    await clock.advance(30 * 60_000 + 1_000)
+    // The set put off was logged, so the one due now can be put off.
+    expect((await fit($, 'snooze 10')).text).toContain('put off until')
+  })
+
   test('/fit snooze needs a set that is due', { options: { strict: true } }, async ($, on) => {
     world(on, new Map([[`${LOG}/2026-10-05`, '10\n'], [`${LOG}/2026-10-05.day`, day({ start: MONDAY_9AM - 60_000 })]]))
     await start($)
