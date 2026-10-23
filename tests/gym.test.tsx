@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { buttonsWidth, canProgress, cells, customRoutine, heatCells, moveGoal, nextGoal, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, stepFor, streak, untilText } from '../hooks/lib'
+import { buttonsWidth, canProgress, cells, cheer, customRoutine, heatCells, moveGoal, nextGoal, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, stepFor, streak, untilText } from '../hooks/lib'
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
@@ -184,10 +184,38 @@ describe('logging', () => {
     expect(ran.text).toContain('60/100 pushups')
     expect(files.get(`${LOG}/2026-10-05`)).toBe('60\n')
     expect(files.has(`${HOME}/.claude/fitness/routine.json`)).toBe(true)
+    expect(toasts.some(t => t.startsWith('💪 +60 pushups.') && t.endsWith('40 to go.'))).toBe(true)
 
+    toasts.length = 0
     await fit($, '40')
     expect(files.get(`${LOG}/2026-10-05`)).toBe('100\n')
     expect(toasts.some(t => t.includes("That's the work"))).toBe(true)
+    // The goal's own toast, not a cheer as well.
+    expect(toasts.some(t => t.startsWith('💪'))).toBe(false)
+  })
+
+  test('a set short of the goal gets a cheer; a lowered count does not', async ($, on) => {
+    const { toasts } = world(on)
+    await start($)
+    await fit($, '10')
+    await fit($, '10')
+    const cheers = toasts.filter(t => t.startsWith('💪 +10 pushups.'))
+    expect(cheers.length).toBe(2)
+    // The line turns with the count.
+    expect(cheers[0]).not.toBe(cheers[1])
+
+    toasts.length = 0
+    await fit($, '-5')
+    await fit($, 'reset')
+    expect(toasts.some(t => t.startsWith('💪'))).toBe(false)
+  })
+
+  test('back-to-back sets of any size get different lines', () => {
+    // 30-rep sets: counts 30, 60, 90 are all multiples of the six lines.
+    for (const size of [5, 10, 25, 30, 60]) {
+      const lines = [1, 2, 3].map(set => cheer(size, set * size, 300, 'squats').split('. ')[1])
+      expect(new Set(lines).size).toBe(3)
+    }
   })
 
   test('/fit reads counts the shell script already wrote', async ($, on) => {

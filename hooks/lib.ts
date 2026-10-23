@@ -386,6 +386,17 @@ export const clockTime = (ms: number) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+const CHEERS = ['Good set.', 'Strong set.', 'Reps in the bank.', 'Keep stacking.', 'Clean work.', "That's how it's built."]
+
+// The toast for a logged set short of the goal. The line turns with the set's
+// number, not the rep count: sets come in fives, so a count like 30, 60, 90
+// would land on one line every time.
+export const cheer = (added: number, count: number, goal: number, exercise: string, unit = '') => {
+  const line = CHEERS[Math.floor(count / Math.max(1, added)) % CHEERS.length] ?? CHEERS[0]
+  const left = goal > count ? ` ${goal - count}${unit} to go.` : ''
+  return `💪 +${added}${unit} ${exercise}. ${line}${left}`
+}
+
 export const describeRoutine = (routine: Routine) =>
   [...new Set(Object.values(routine).map(p => `${p.goal}${p.unit ?? ''} ${p.exercise}`))].join(' / ')
 
