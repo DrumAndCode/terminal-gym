@@ -36,7 +36,7 @@ type Data = {
   ledger: readonly Day[] | null
   range: number
   now: number
-  onRange: (days: number) => void
+  onRange: (days: number) => Promise<void>
   onClose: () => void
 }
 

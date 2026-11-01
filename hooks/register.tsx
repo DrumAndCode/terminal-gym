@@ -548,8 +548,8 @@ const endRest = async ($: Engine) => {
 
 // The chart's range, kept for the next time the scoreboard opens.
 const pickRange = async ($: Engine, days: number) => {
-  await $.store.set('chartDays', days)
   await update($, chartDays, () => days)
+  await $.store.set('chartDays', days)
 }
 
 const markIntroduced = async ($: Engine) => {
@@ -1029,7 +1029,7 @@ export const register: Register = (on, options) => {
       ledger: await read($, ledger),
       range: await read($, chartDays),
       now: await $.clock.now(),
-      onRange: days => void pickRange($, days),
+      onRange: days => pickRange($, days),
       onClose: () => closePane($, PANE),
     }),
   )
