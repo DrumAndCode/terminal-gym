@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { amount, axisText, barCells, barSvg, bestStreak, bucketDays, bucketLabel, changeText, chartBars, chartWidth, commas, exerciseColors, exerciseTotals, faded, nextMilestone, rangeSummary, yearCells } from '../hooks/stats'
 import { buttonsWidth, canProgress, cells, cheer, customRoutine, heatCells, moveGoal, nextGoal, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, stepFor, streak, untilText } from '../hooks/lib'
 
 const HOME = '/home/t'
@@ -1304,7 +1305,6 @@ describe('streaks and today', () => {
     await fit($, 'streak')
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /pushups  ◀ today/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /▒ today/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -1474,5 +1474,300 @@ describe('progressive goals', () => {
     expect(config.get('terminal-gym.progress')).toBe(true)
     await fit($, 'progress off')
     expect(config.get('terminal-gym.progress')).toBe(false)
+  })
+})
+
+// A Raster's cells back as words: [codePoint, foreground, background] triplets.
+const words = (cells: string) => new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
+const glyphRow = (grid: { columns: number; cells: string }, row: number) => {
+  const all = words(grid.cells)
+  return Array.from({ length: grid.columns }, (_, col) => String.fromCodePoint(all[(row * grid.columns + col) * 3] ?? 0x20)).join('')
+}
+
+const [GOLD, BLUE, PINK] = [0xb88a20, 0x2f9bdc, 0xd4608f]
+
+const logged = (date: string, count: number, exercise = 'pushups', goal = 100, unit?: string) => ({
+  date,
+  count,
+  goal,
+  exercise,
+  isSkipped: false,
+  ...(unit === undefined ? {} : { unit }),
+})
+
+describe('scoreboard numbers', () => {
+  test('totals add up each exercise, most reps first, and keep the best day', () => {
+    const rows = exerciseTotals([
+      logged('2026-09-01', 100),
+      logged('2026-09-02', 300, 'squats', 300),
+      logged('2026-09-04', 120),
+      logged('2026-09-07', 120),
+      logged('2026-09-08', 90, 'plank', 60, 's'),
+    ])
+    expect(rows.map(row => row.exercise)).toEqual(['pushups', 'squats', 'plank'])
+    expect(rows[0]).toEqual({ exercise: 'pushups', unit: '', total: 340, days: 3, goalsHit: 3, best: 120, bestDate: '2026-09-04' })
+    expect(rows[2]?.unit).toBe('s')
+  })
+
+  test('milestones are the next round number, past the ladder too', () => {
+    expect(nextMilestone(0)).toBe(100)
+    expect(nextMilestone(100)).toBe(250)
+    expect(nextMilestone(9_999)).toBe(10_000)
+    expect(nextMilestone(1_000_000)).toBe(2_000_000)
+    expect(nextMilestone(2_345_678)).toBe(3_000_000)
+  })
+
+  test('numbers read with commas and their unit', () => {
+    expect(commas(999)).toBe('999')
+    expect(commas(1234567)).toBe('1,234,567')
+    expect(amount(1200)).toBe('1,200 reps')
+    expect(amount(1200, 's')).toBe('1,200s')
+  })
+
+  test('the best streak is the longest run, across months and rest days', () => {
+    expect(bestStreak([])).toBe(0)
+    expect(bestStreak([
+      logged('2026-08-30', 5),
+      logged('2026-08-31', 5),
+      logged('2026-09-01', 5),
+      logged('2026-09-03', 5),
+    ])).toBe(3)
+    expect(bestStreak([logged('2026-09-01', 5), { ...logged('2026-09-02', 5), isSkipped: true }, logged('2026-09-03', 5)])).toBe(1)
+  })
+
+  test('a range compares with the same span before it', () => {
+    const ledger = [logged('2026-09-25', 100), logged('2026-09-28', 100), logged('2026-10-03', 150), logged('2026-10-05', 150, 'squats'), logged('2026-10-05', 80)]
+    expect(rangeSummary(ledger, 'pushups', MONDAY_9AM, 7)).toEqual({ total: 230, sessions: 2, change: 15 })
+    expect(rangeSummary(ledger, 'squats', MONDAY_9AM, 7).change).toBeUndefined()
+    expect(changeText(15)).toBe('▲ 15%')
+    expect(changeText(-8)).toBe('▼ 8%')
+    expect(changeText(0)).toBe('= same')
+    expect(changeText(undefined)).toBe('')
+  })
+
+  test('a bar a day while they fit, else whole weeks ending today', () => {
+    expect(bucketDays(30, 40)).toBe(1)
+    expect(bucketDays(90, 40)).toBe(7)
+    expect(bucketDays(365, 40)).toBe(14)
+    expect(bucketLabel(1)).toBe('a bar a day')
+    expect(bucketLabel(7)).toBe('a bar a week')
+    expect(bucketLabel(14)).toBe('a bar per 2 weeks')
+  })
+
+  test('exercises take colours by first day logged, and later ones share grey', () => {
+    const colors = exerciseColors([
+      logged('2026-09-01', 5, 'pushups'),
+      logged('2026-09-02', 5, 'dips'),
+      logged('2026-09-03', 5, 'pushups'),
+      logged('2026-09-04', 5, 'squats'),
+      logged('2026-09-05', 5, 'burpees'),
+      logged('2026-09-06', 5, 'lunges'),
+    ])
+    expect(colors.get('pushups')).toBe(GOLD)
+    expect(colors.get('dips')).toBe(BLUE)
+    expect(colors.get('squats')).toBe(PINK)
+    expect(colors.get('burpees')).toBe(colors.get('lunges'))
+  })
+
+  test('one chart: a bar holds its day, bright for a goal and faded when short', () => {
+    const ledger = [logged('2026-10-03', 100, 'pushups'), logged('2026-10-04', 60, 'dips')]
+    const bars = chartBars(ledger, exerciseColors(ledger), MONDAY_9AM, 3, 40)
+    expect(bars).toEqual([
+      { segments: [{ reps: 100, color: GOLD }] },
+      { segments: [{ reps: 60, color: faded(BLUE) }] },
+      { segments: [] },
+    ])
+  })
+
+  test('a week bar stacks each exercise, split by goal hit and short', () => {
+    const ledger = [logged('2026-10-05', 40, 'dips'), logged('2026-10-04', 100, 'pushups'), logged('2026-10-03', 100, 'dips'), logged('2026-09-28', 20, 'dips')]
+    const colors = exerciseColors([...ledger].reverse())
+    const bars = chartBars(ledger, colors, MONDAY_9AM, 14, 7)
+    expect(bars.length).toBe(2)
+    expect(bars[0]?.segments).toEqual([{ reps: 20, color: faded(GOLD) }])
+    const stack = bars[1]?.segments ?? []
+    // One exercise's parts stay together: dips, goal then short, then pushups.
+    expect(stack).toEqual([{ reps: 100, color: GOLD }, { reps: 40, color: faded(GOLD) }, { reps: 100, color: BLUE }])
+  })
+
+  test('bars scale to the tallest, on five rows of eighths', () => {
+    const grid = barCells([{ segments: [] }, { segments: [{ reps: 50, color: GOLD }] }, { segments: [{ reps: 100, color: BLUE }] }], 6)
+    expect(grid.columns).toBe(5)
+    expect(grid.rows).toBe(5)
+    expect(glyphRow(grid, 0)).toBe('    █')
+    expect(glyphRow(grid, 2)).toBe('  ▄ █')
+    expect(glyphRow(grid, 4)).toBe('▁ █ █')
+    // The empty day's tick is the dim one; the bar next to it wears its colour.
+    expect(words(grid.cells)[(4 * 5 + 0) * 3 + 1]).toBe(0x343434)
+    expect(words(grid.cells)[(4 * 5 + 2) * 3 + 1]).toBe(GOLD)
+  })
+
+  test('a stack meeting inside a cell draws one colour over the other', () => {
+    const grid = barCells([{ segments: [{ reps: 3, color: GOLD }, { reps: 37, color: BLUE }] }], 1)
+    expect([...words(grid.cells).subarray(4 * 3, 5 * 3)]).toEqual([0x2583, GOLD, BLUE])
+    expect(glyphRow(grid, 0)).toBe('█')
+  })
+
+  test('a tiny segment still shows beside a huge one', () => {
+    const grid = barCells([{ segments: [{ reps: 1, color: GOLD }, { reps: 10000, color: BLUE }] }], 1)
+    expect(words(grid.cells)[4 * 3 + 1]).toBe(GOLD)
+  })
+
+  test('bars touch when they only just fit, and the chart stays inside its width', () => {
+    const bars = Array.from({ length: 30 }, () => ({ segments: [{ reps: 5, color: GOLD }] }))
+    expect(chartWidth(30, 40)).toBe(30)
+    expect(chartWidth(7, 40)).toBeLessThanOrEqual(40)
+    expect(barCells(bars, 40).columns).toBe(30)
+  })
+
+  test('other surfaces get the same stacks as SVG', () => {
+    const svg = barSvg([{ segments: [] }, { segments: [{ reps: 100, color: GOLD }] }])
+    expect(svg).toContain('viewBox="0 0 20 80"')
+    expect(svg).toContain('fill="#b88a20"')
+  })
+
+  test('the axis names the first day and today, or today alone when tight', () => {
+    expect(axisText(7, MONDAY_9AM, 20)).toBe('09-29          today')
+    expect(axisText(7, MONDAY_9AM, 8)).toBe('today')
+  })
+
+  test('the year grid ends this week and leaves later days blank', () => {
+    // A Monday: Sunday and today are drawn, Tuesday on are blank.
+    const ledger = [logged('2026-10-04', 100)]
+    const grid = yearCells(ledger, exerciseColors(ledger), MONDAY_9AM, 40)
+    expect(grid.columns).toBe(40)
+    expect(grid.rows).toBe(4)
+    const all = words(grid.cells)
+    const lastColumn = (row: number) => all.subarray((row * 40 + 39) * 3, (row * 40 + 40) * 3)
+    expect([...lastColumn(0)]).toEqual([0x2580, GOLD, 0x87af87])
+    expect([...lastColumn(1)]).toEqual([0x20, 0x01000000, 0x01000000])
+    expect(grid.months).toContain('Oct')
+    expect(yearCells([], new Map(), MONDAY_9AM, 200).columns).toBe(53)
+  })
+})
+
+describe('the scoreboard pane', () => {
+  // A day each for three exercises, more than the 28-day grid reaches.
+  const season = () => new Map([
+    [`${HOME}/.claude/fitness/routine.json`, `${JSON.stringify({ mon: { exercise: 'pushups', goal: 100 }, tue: { exercise: 'plank', goal: 60, unit: 's' }, sat: { exercise: 'squats', goal: 300 } })}\n`],
+    [`${LOG}/2026-01-05`, '1200\n'],
+    [`${LOG}/2026-01-05.swap`, `${JSON.stringify({ exercise: 'squats', goal: 300 })}\n`],
+    [`${LOG}/2026-10-03`, '300\n'],
+    [`${LOG}/2026-10-05`, '40\n'],
+    [`${LOG}/2026-10-05.day`, '{}\n'],
+    [`${LOG}/2026-10-05.skip`, 'off\n'],
+    [`${LOG}/2026-09-29`, '90\n'],
+    [`${LOG}/not-a-day`, '9999\n'],
+  ])
+  const WIDE = { ...PANE, props: { ...PANE.props, bodyColumns: 70 } }
+
+  test('all-time totals reach past the grid, with the next milestone and best day', async ($, on) => {
+    world(on, season())
+    await start($)
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    // The plank's seconds stay out of the reps, and the stray file out of both.
+    expect(await ui.find({ type: 'Text', text: /1,540 reps · 4 days trained · 3 goals hit/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '1,500' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /→ 2,500/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /best 1,200/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '90s' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('one chart holds every exercise, and the range buttons change it and stick', async ($, on) => {
+    const { files } = world(on, season())
+    await start($)
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    expect(await ui.find({ type: 'Text', text: /LAST 30 DAYS · a bar a day · peak 300/ })).toBeDefined()
+    for (const key of ['chart', 'year']) expect(await ui.find({ type: 'Raster', key })).toBeDefined()
+    for (const line of [/^300 reps · 1 session$/, /^40 reps · 1 session$/, /^90s · 1 session$/]) {
+      expect(await ui.find({ type: 'Text', text: line })).toBeDefined()
+    }
+    await ui.press({ key: 'range-90' })
+    expect(await ui.find({ type: 'Text', text: /LAST 90 DAYS · a bar a week/ })).toBeDefined()
+    await ui.unmount()
+    expect(files.size).toBeGreaterThan(0)
+    await start($)
+    const back = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    expect(await back.find({ type: 'Text', text: /LAST 90 DAYS/ })).toBeDefined()
+    await back.unmount()
+  })
+
+  test('/fit streak 90 picks the range and an open pane stays open', async ($, on) => {
+    const { open } = world(on, season())
+    await start($)
+    await fit($, 'streak')
+    const text = (await fit($, 'streak 90')).text
+    expect(text).toContain('last 90 days')
+    expect(open.has('gym-week')).toBe(true)
+    expect((await fit($, 'streak nope')).text).toContain('2 to 365')
+    expect((await fit($, 'streak 1')).text).toContain('2 to 365')
+    expect(parseFit('streak 45d')).toEqual({ kind: 'week', days: 45 })
+  })
+
+  test('a range with no reps says so instead of drawing empty charts', async ($, on) => {
+    world(on, new Map([[`${LOG}/2026-01-05`, '100\n']]))
+    await start($)
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    expect(await ui.find({ type: 'Text', text: 'No reps in the last 30 days.' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('with nothing logged it points at the first set', async ($, on) => {
+    world(on)
+    await start($)
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /fit 10 logs your first set/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a set logged while it is open moves the totals', async ($, on) => {
+    world(on, season())
+    await start($)
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    await fit($, '10')
+    expect(await ui.find({ type: 'Text', text: /1,550 reps/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('remote surfaces get SVG charts and no year grid', async ($, on) => {
+    world(on, season())
+    await start($)
+    await fit($, 'streak')
+    for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+      const ui = await $.ui.mount({ plugin: 'terminal-gym', surface, ...WIDE })
+      expect(await ui.find({ type: 'Svg' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /THE PAST YEAR/ })).toBeUndefined()
+      await ui.unmount()
+    }
+  })
+
+  test('a narrow pane drops the meter and keeps the total', async ($, on) => {
+    world(on, season())
+    await start($)
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 24 } })
+    expect(await ui.find({ type: 'Text', text: '1,500' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /→/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a new program freezes logged days past the grid, so totals keep their exercise', async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-01-06`, '50\n']]))
+    await start($)
+    await fit($, 'program')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, requestId: 'gym-onboard' })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'program-1' })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'finish' })
+    await ui.unmount()
+    // A Tuesday under the default rotation.
+    expect(files.get(`${LOG}/2026-01-06.swap`)).toBe(`${JSON.stringify({ exercise: 'dips', goal: 100 })}\n`)
   })
 })

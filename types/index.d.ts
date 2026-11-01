@@ -13,6 +13,8 @@ export type Day = {
   goal: number
   exercise: string
   isSkipped: boolean
+  // "s" for timed exercises; absent for reps.
+  unit?: string
 }
 
 export type OnboardPick = {
@@ -49,6 +51,9 @@ declare module 'claude-code' {
       onboardStep: number
       onboardPick: OnboardPick
       history: Day[]
+      // Every day with reps, oldest first; null until the scoreboard first loads it.
+      ledger: Day[] | null
+      chartDays: number
       olderStreak: number
     }
   }

@@ -31,6 +31,12 @@ export const lastDays = (ms: number, n: number) => {
   return Array.from({ length: n }, (_, i) => noon - (n - 1 - i) * DAY_MS)
 }
 
+// Noon of a dated day, as `lastDays` anchors them.
+export const noonOf = (date: string) => {
+  const [y = 0, m = 1, d = 1] = date.split('-').map(Number)
+  return new Date(y, m - 1, d, 12).getTime()
+}
+
 export const bar = (count: number, goal: number, width = 10) => {
   const filled = goal > 0 ? Math.min(width, Math.floor((count / goal) * width)) : 0
   return '▓'.repeat(filled) + '░'.repeat(width - filled)
@@ -38,7 +44,8 @@ export const bar = (count: number, goal: number, width = 10) => {
 
 export type FitCommand =
   | { kind: 'status' }
-  | { kind: 'week' }
+  // `days`: open on that chart range. Absent: toggle the scoreboard.
+  | { kind: 'week'; days?: number }
   | { kind: 'skip' }
   | { kind: 'unskip' }
   | { kind: 'help' }
@@ -62,12 +69,18 @@ export type FitCommand =
 // How long a set can be put off, and how often.
 export const SNOOZE = { defaultMinutes: 30, maxMinutes: 60, perDay: 2 } as const
 
-const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | snooze [minutes] | swap [exercise] | rest [off] | streak | program | progress [off] | help | strict | easy | reload | start | hide]'
+const USAGE = 'usage: /fit [<n> | set <n> | reset | goal <n> | window <hours>|<hhmm>|off | snooze [minutes] | swap [exercise] | rest [off] | streak [days] | program | progress [off] | help | strict | easy | reload | start | hide]'
 
 export const parseFit = (args: string): FitCommand => {
   const [head = '', value] = args.trim().split(/\s+/)
   if (head === '' || head === 'status') return { kind: 'status' }
-  if (head === 'streak') return { kind: 'week' }
+  if (head === 'streak') {
+    if (value === undefined) return { kind: 'week' }
+    const days = /^\d+d?$/.test(value) ? parseInt(value, 10) : NaN
+    return days >= 2 && days <= 365
+      ? { kind: 'week', days }
+      : { kind: 'error', text: 'fit: streak charts 2 to 365 days, like /fit streak 90' }
+  }
   if (head === 'rest') return value === 'off' ? { kind: 'unskip' } : { kind: 'skip' }
   if (head === 'program') return { kind: 'program' }
   if (head === 'swap') {
@@ -142,10 +155,12 @@ export const streak = (history: readonly Day[]) => {
 // The engine environment has Uint8Array#toBase64; es2023 typings do not.
 type Base64Bytes = Uint8Array & { toBase64: () => string }
 
+export const encodeCells = (words: Uint32Array) => (new Uint8Array(words.buffer) as Base64Bytes).toBase64()
+
 const ACCENT = 0xc8a86b
 const PARTIAL = 0x6b5d3f
-const EMPTY = 0x343434
-const DEFAULT = 0x01000000
+export const EMPTY = 0x343434
+export const DEFAULT = 0x01000000
 
 // The streak, counting days older than the window when every day in it has reps.
 export const fullStreak = (history: readonly Day[], older: number) => {
@@ -189,7 +204,7 @@ export const heatCells = (history: readonly Day[]) => {
       words[at + 2] = DEFAULT
     }
   }
-  return { columns, rows, cells: (new Uint8Array(words.buffer) as Base64Bytes).toBase64() }
+  return { columns, rows, cells: encodeCells(words) }
 }
 
 // Grey until the first rep, then yellow on the way and green for the last fifth.
@@ -421,7 +436,8 @@ or press a **+** button above the prompt (sized to your set)
 | \`/fit swap\` | switch today's exercise |
 | \`/fit rest\` | rest day, before any reps (breaks streak) |
 | \`/fit rest off\` | undo today's rest day |
-| \`/fit streak\` | streak + grid |
+| \`/fit streak\` | scoreboard: all-time totals, charts, the year |
+| \`/fit streak 90\` | chart the last 90 days |
 | \`/fit program\` | pick your training |
 | \`/fit progress\` | hit a goal, the next session of it goes up 5% (\`off\` to stop) |
 | \`/fit strict\` / \`/fit easy\` | strict mode on / off |
