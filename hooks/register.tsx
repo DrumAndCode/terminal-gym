@@ -4,7 +4,6 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Day, OnboardPick, Pace, Today } from '../types'
 import {
   DEFAULT_ROUTINE,
-  BARBELL,
   HELP,
   SNOOZE,
   MINI_BARBELL,
@@ -27,11 +26,11 @@ import {
   fullStreak,
   keepsStreak,
   describeRoutine,
-  GRID_COLORS,
   heatCells,
   lastDays,
   moveGoal,
   nextGoal,
+  noonOf,
   parseFit,
   pickSwap,
   progressColor,
@@ -41,6 +40,8 @@ import {
   weekdayKey,
 } from './lib'
 import type { Routine } from './lib'
+import { DEFAULT_RANGE } from './stats'
+import { drawScoreboard } from './scoreboard'
 
 type Engine = EngineInterface
 
@@ -75,6 +76,8 @@ const olderStreak = atom({ plugin: 'terminal-gym', key: 'olderStreak' } as const
 const pace = atom({ plugin: 'terminal-gym', key: 'pace' } as const, null)
 const isWaiting = atom({ plugin: 'terminal-gym', key: 'isWaiting' } as const, false)
 const history = atom({ plugin: 'terminal-gym', key: 'history' } as const, [])
+const ledger = atom({ plugin: 'terminal-gym', key: 'ledger' } as const, null)
+const chartDays = atom({ plugin: 'terminal-gym', key: 'chartDays' } as const, DEFAULT_RANGE)
 const isIntroduced = atom({ plugin: 'terminal-gym', key: 'isIntroduced' } as const, false)
 const onboardStep = atom({ plugin: 'terminal-gym', key: 'onboardStep' } as const, 0)
 const onboardPick = atom({ plugin: 'terminal-gym', key: 'onboardPick' } as const, {
@@ -180,6 +183,7 @@ const readDay = async ($: Engine, routine: Routine, logDir: string, ms: number):
     goal: plan?.goal ?? 0,
     exercise: plan?.exercise ?? 'reps',
     isSkipped: await readRest($, `${logDir}/${date}.skip`),
+    ...(plan?.unit === undefined ? {} : { unit: plan.unit }),
   }
 }
 
@@ -214,23 +218,28 @@ const olderRun = async ($: Engine, days: readonly Day[], routine: Routine, logDi
 const refreshHistory = async ($: Engine) => {
   const { routine: routinePath, log: logDir } = await files($)
   const routine = await loadRoutine($, routinePath)
-  const days: Day[] = await Promise.all(
-    lastDays(await $.clock.now(), HISTORY_DAYS).map(async ms => {
-      const date = dayKey(ms)
-      const plan = (await readSwap($, logDir, date)) ?? routine[weekdayKey(ms)]
-      return {
-        date,
-        count: await readCount($, `${logDir}/${date}`),
-        goal: plan?.goal ?? 0,
-        exercise: plan?.exercise ?? 'reps',
-        isSkipped: await readRest($, `${logDir}/${date}.skip`),
-      }
-    }),
-  )
+  const days = await Promise.all(lastDays(await $.clock.now(), HISTORY_DAYS).map(ms => readDay($, routine, logDir, ms)))
   await update($, history, () => days)
   const older = await olderRun($, days, routine, logDir)
   await update($, olderStreak, () => older)
+  if (await isScoreboardOpen($)) await refreshLedger($)
   return days
+}
+
+const isScoreboardOpen = async ($: Engine) => (await $.ui.panes()).some(pane => pane.id === PANE)
+
+// The days the log holds counts for: a count's file is named by its date alone.
+const loggedDates = async ($: Engine, logDir: string) =>
+  (await $.fs.exists(logDir)) ? (await $.fs.list(logDir)).map(entry => entry.name).filter(name => /^\d{4}-\d{2}-\d{2}$/.test(name)).sort() : []
+
+// All-time: every day in the log, not just the grid's. It reads a file per day,
+// so it runs only while the scoreboard is open.
+const refreshLedger = async ($: Engine) => {
+  const { routine: routinePath, log: logDir } = await files($)
+  const routine = await loadRoutine($, routinePath)
+  const dates = await loggedDates($, logDir)
+  const days = await Promise.all(dates.map(date => readDay($, routine, logDir, noonOf(date))))
+  await update($, ledger, () => days.filter(day => day.count > 0))
 }
 
 type Schedule = { from: number; ms: number; base: number }
@@ -445,6 +454,7 @@ const logReps = async ($: Engine, change: (count: number) => number) => {
   await update($, history, days =>
     days.map(day => (day.date === after.date ? { ...day, count } : day)),
   )
+  if (await isScoreboardOpen($)) await refreshLedger($)
 
   // A set that still leaves reps owed earns a breather before the rest: a short
   // one counts, and fewer reps than the band's smallest button earn a shorter
@@ -536,6 +546,12 @@ const endRest = async ($: Engine) => {
   return { text: `Rest day undone. Back to work. ${line(back)}` }
 }
 
+// The chart's range, kept for the next time the scoreboard opens.
+const pickRange = async ($: Engine, days: number) => {
+  await $.store.set('chartDays', days)
+  await update($, chartDays, () => days)
+}
+
 const markIntroduced = async ($: Engine) => {
   await $.store.set('introduced', true)
   await update($, isIntroduced, () => true)
@@ -578,9 +594,15 @@ const pickedRoutine = (p: OnboardPick): Routine | undefined => {
 // trained against, written down as their own plan the way `/fit swap` does.
 const freezePastDays = async ($: Engine, old: Routine) => {
   const { log: logDir } = await files($)
-  for (const ms of lastDays(await $.clock.now(), HISTORY_DAYS).slice(0, -1)) {
-    const path = `${logDir}/${dayKey(ms)}.swap`
-    const plan = old[weekdayKey(ms)]
+  const recent = lastDays(await $.clock.now(), HISTORY_DAYS).slice(0, -1)
+  const today = dayKey(await $.clock.now())
+  // Every logged day too: all-time totals credit each one to its exercise.
+  const logged = (await loggedDates($, logDir)).filter(date => date < today)
+  for (const ms of new Set([...logged.map(noonOf), ...recent])) {
+    const date = dayKey(ms)
+    const path = `${logDir}/${date}.swap`
+    // A logged day the old routine left out stays as it reads now, not the new plan's.
+    const plan = old[weekdayKey(ms)] ?? (logged.includes(date) ? { exercise: 'reps', goal: 0 } : undefined)
     if (plan !== undefined && !(await $.fs.exists(path))) await $.fs.write(path, `${JSON.stringify(plan)}\n`)
   }
 }
@@ -623,6 +645,8 @@ const SAMPLE_DAYS: Day[] = [1, 1, 0.4, 1, 1, 0, 1, 1, 1, 0.6, 1, 1, 1, 0.3].map(
 const boot = async ($: Engine) => {
   const introduced = (await $.store.get('introduced')) === true
   await update($, isIntroduced, () => introduced)
+  const range = await $.store.get('chartDays')
+  if (typeof range === 'number') await update($, chartDays, () => range)
   // A new conversation looks again: the routine may have moved since.
   progressedOn = ''
   await refreshToday($)
@@ -695,13 +719,17 @@ export const register: Register = (on, options) => {
       case 'unskip':
         return endRest($)
       case 'week': {
-        if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
+        const isOpen = await isScoreboardOpen($)
+        if (isOpen && cmd.days === undefined) {
           await $.ui.close({ id: PANE })
           return { text: 'Scoreboard closed.' }
         }
+        if (cmd.days !== undefined) await pickRange($, cmd.days)
+        // Open first: see openOnboarding. The numbers arrive once the log is read.
+        if (!isOpen) await $.ui.open({ id: PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
         const days = await refreshHistory($)
-        await $.ui.open({ id: PANE, title: 'TERMINAL GYM', focus: true, closeOnEscape: true })
-        return { text: `🔥 ${fullStreak(days, await read($, olderStreak))}-day streak · Esc or /fit streak to close` }
+        const range = cmd.days === undefined ? '' : ` · last ${cmd.days} days`
+        return { text: `🔥 ${fullStreak(days, await read($, olderStreak))}-day streak${range} · Esc or /fit streak to close` }
       }
       case 'swap': {
         const before = await refreshToday($)
@@ -994,89 +1022,17 @@ export const register: Register = (on, options) => {
     )
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const days = await read($, history)
-    const run = fullStreak(days, await read($, olderStreak))
-    const heat = heatCells(days)
-    const week = days.slice(-7)
-
-    const { Box, Text } = $.ui.resolve(e)
-    // The bar needs a monospace grid of BARBELL.width cells: the terminal's.
-    // Elsewhere, or too narrow, the name alone.
-    const barbell =
-      e.surface === 'terminal' && e.props.bodyColumns >= BARBELL.width ? (
-        <Box flexDirection="column">
-          <Text>{BARBELL.plates}</Text>
-          <Box>
-            <Text>{BARBELL.left}</Text>
-            <Text bold>{BARBELL.name}</Text>
-            <Text>{BARBELL.right}</Text>
-          </Box>
-          <Text>{BARBELL.plates}</Text>
-          <Text> </Text>
-        </Box>
-      ) : (
-        <Text bold>{BARBELL.name}</Text>
-      )
-
-    // One row a day: date, its progress bar in the band's colors, then the count.
-    // Counts padded to one width so the exercise names line up.
-    const counts = week.map(day => (day.isSkipped ? 'rest' : `${day.count}/${day.goal}`))
-    const countWidth = Math.max(0, ...counts.map(count => count.length))
-    const filled = (day: Day) => (day.goal > 0 ? Math.min(10, Math.floor((day.count / day.goal) * 10)) : 0)
-    const summary = week.map((day, i) => {
-      const mark = day.isSkipped ? '–' : day.goal > 0 && day.count >= day.goal ? '✓' : '·'
-      const isToday = i === week.length - 1
-      const color = day.isSkipped ? undefined : progressColor(day.count, day.goal)
-      return (
-        <Box key={`day-${day.date}`}>
-          <Text dimColor={!isToday} bold={isToday}>{`${mark} ${day.date.slice(5)}  `}</Text>
-          {/* Thin lines, not shaded blocks: blocks on stacked rows merge into slabs. */}
-          <Text color={color ?? GRID_COLORS.none}>{'━'.repeat(day.isSkipped ? 0 : filled(day))}</Text>
-          <Text dimColor>{(day.isSkipped ? '╌' : '─').repeat(10 - (day.isSkipped ? 0 : filled(day)))}</Text>
-          <Text dimColor={!isToday} bold={isToday}>
-            {`  ${(counts[i] ?? '').padEnd(countWidth)}  ${day.exercise}${isToday ? '  ◀ today' : ''}`}
-          </Text>
-        </Box>
-      )
-    })
-
-    if (e.surface === 'terminal') {
-      const { Button, Raster } = $.ui.resolve(e)
-      return (
-        <Box flexDirection="column">
-          {barbell}
-          <Text bold>🔥 {run}-day streak</Text>
-          <Text> </Text>
-          {summary}
-          <Text> </Text>
-          <Text dimColor>last {HISTORY_DAYS / 7} weeks, a square a day</Text>
-          <Raster key="heat" {...heat} />
-          <Box>
-            <Text color={GRID_COLORS.goal}>█ </Text>
-            <Text dimColor>goal  </Text>
-            <Text color={GRID_COLORS.some}>█ </Text>
-            <Text dimColor>some reps  </Text>
-            <Text color={GRID_COLORS.none}>█ </Text>
-            <Text dimColor>none  ▒ today</Text>
-          </Box>
-          <Text> </Text>
-          <Text dimColor>Esc or /fit streak to close</Text>
-          <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
-        </Box>
-      )
-    }
-
-    const { Button } = $.ui.resolve(e)
-    return (
-      <Box flexDirection="column">
-        {barbell}
-        <Text bold>🔥 {run}-day streak</Text>
-        {summary}
-        <Button key="close" label="Close" onPress={() => closePane($, PANE)} />
-      </Box>
-    )
-  })
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) =>
+    drawScoreboard(e, $.ui.resolve(e), {
+      days: await read($, history),
+      older: await read($, olderStreak),
+      ledger: await read($, ledger),
+      range: await read($, chartDays),
+      now: await $.clock.now(),
+      onRange: days => void pickRange($, days),
+      onClose: () => closePane($, PANE),
+    }),
+  )
 
   on('ui.render', { component: 'Pane', requestId: HELP_PANE }, async ($, e) => {
     const { Box, Button, Markdown, Text } = $.ui.resolve(e)

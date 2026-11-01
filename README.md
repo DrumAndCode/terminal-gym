@@ -23,9 +23,9 @@ https://github.com/user-attachments/assets/14373c7e-ad8a-4f92-812b-c93c3201b1b3
 - **Cheers**: a toast for every set you log, with the reps left to go.
 - **Long-turn nudges** (easy mode): when Claude works past 30 seconds, a toast and the spinner suggest a set.
 - **Strict mode**: today's goal is split into sets spread over your day. Fall behind and your prompts wait until you catch up.
-- **Scoreboard** (`/fit streak`): an ASCII barbell (in the terminal), your streak, a 28-day grid and the last week by exercise, with today marked.
+- **Scoreboard** (`/fit streak`): an ASCII barbell (in the terminal), your streak and best streak, all-time reps per exercise with the next milestone, one chart of every exercise in its own color, the past year as a grid, and the last week by exercise.
 - **Progressive goals** (opt-in): hit a goal, and the next session of that exercise asks for about 5% more.
-- **Streaks**: count every day you log any reps, for as long as you keep it going. A day with none, or a rest day, resets it. The grid still marks the days you hit the full goal.
+- **Streaks**: count every day you log any reps, for as long as you keep it going. A day with none, or a rest day, resets it. The chart and grid still mark the days you hit the full goal.
 
 ## How a strict day works
 
@@ -67,6 +67,18 @@ With the default rotation, 100 pushups on Monday moves Thursday and Sunday to 10
 
 The new goal is written to `routine.json`. Before that, the days before today are frozen at the goals they had, so the grid still shows them as hit. `/fit progress off` stops the changes and keeps the goals where they are.
 
+## The scoreboard
+
+`/fit streak` opens the scoreboard. `/fit streak 90` opens it on the last 90 days, from 2 to 365. The **7d**, **30d**, **90d** and **1y** buttons change the range, and the scoreboard keeps your choice for next time.
+
+- **All time** counts every day in `~/.claude/fitness/log`. Each exercise shows its total, a meter to the next milestone and its best day.
+- **The chart** shows every exercise on one timeline, with a bar a day while the days fit across the pane. A longer range shows a bar per week or more, stacked by exercise. Bar height is reps.
+- **The year grid** shows the past year, one column a week. It draws in the terminal only.
+
+Each exercise keeps one color. Your first three logged exercises get gold, blue and pink. Later exercises share grey, because a fourth color can't stay distinct under color blindness, and their labels tell them apart. A bright bar or square means you hit the goal. A dim one means you fell short.
+
+A day's log is one count for one exercise. If you `/fit swap` during a day, that day's reps all count for the exercise it ended on. Timed exercises count in the chart's bars alongside reps, and the headline total counts reps only.
+
 ## Several sessions at once
 
 Every Claude Code session reads the same log in `~/.claude/fitness`, so a set you log in one counts in all of them. Each session checks the log every 10 seconds and redraws its band when another session, or the shell, wrote to it. `/fit reload` does the same read right away.
@@ -86,7 +98,8 @@ Every Claude Code session reads the same log in `~/.claude/fitness`, so a set yo
 | `/fit swap [exercise]` | switch today's exercise: the next in your program, or the one you name, with that exercise's goal |
 | `/fit rest` | rest day: no sets due, breaks your streak. Only before you've logged reps that day |
 | `/fit rest off` | undo today's rest day (or press **Train today** on the band) |
-| `/fit streak` | scoreboard: streak, grid and the last week (run again or press Esc to close) |
+| `/fit streak` | scoreboard: all-time totals, chart, the past year and the last week (run again or press Esc to close) |
+| `/fit streak 90` | scoreboard on the last 90 days (2 to 365) |
 | `/fit program` | pick your program (the walkthrough), or **Custom goals** to type each exercise's daily goal |
 | `/fit progress` | progressive goals on (`/fit progress off` to stop) |
 | `/fit strict` / `/fit easy` | strict mode on / off |
@@ -125,8 +138,8 @@ The mod makes no network calls and adds no hidden context for the model. `/fit` 
 
 A mod runs inside Claude Code, so here is everything Terminal Gym touches:
 
-- **Files it writes:** only its own data in `~/.claude/fitness`: the routine (also when progressive goals move a goal), the daily logs listed above, and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
-- **Its own store:** two values in the mod's per-plugin store inside Claude Code: the streak cache and whether you've seen the welcome. Everything sessions share (today's start, a `/fit window`, a breather) is in the day's file above, so every session reads the same one.
+- **Files it writes:** only its own data in `~/.claude/fitness`: the routine (also when progressive goals move a goal), the daily logs listed above (a program change writes a `.swap` for each past logged day, so all-time totals keep each day's exercise), and `routine.json.bak` (a copy of your custom routine, made before the walkthrough replaces it). It never writes settings files, instructions, build or start-up files directly.
+- **Its own store:** three values in the mod's per-plugin store inside Claude Code: the streak cache, whether you've seen the welcome, and the scoreboard's chart range. Everything sessions share (today's start, a `/fit window`, a breather) is in the day's file above, so every session reads the same one.
 - **Settings it changes:** `/fit strict` and `/fit easy` turn its own *Strict mode* setting (`terminal-gym.strict`) on and off. `/fit progress` does the same for its *Progressive goals* setting (`terminal-gym.progress`). Those are the only settings it changes. It sets no environment variables; it reads `HOME` to find `~/.claude/fitness`.
 - **Permissions:** it never approves or denies a tool call, never changes your permission mode, and never runs a model or a process.
 - **Events it hooks:**
@@ -134,7 +147,7 @@ A mod runs inside Claude Code, so here is everything Terminal Gym touches:
   - `command.run`: answers its own `/fit` command, and nothing else.
   - `session.start` and the SessionStart event after `/clear` or `/resume`: load today's state and register `/fit`. The event passes through unchanged.
   - `turn.start` and `turn.complete`: time the easy-mode nudge and refresh the band.
-  - a timer every 10 seconds: lists `~/.claude/fitness/log` and re-reads it when a file changed, so sessions stay in step.
+  - a timer every 10 seconds: lists `~/.claude/fitness/log` and re-reads it when a file changed, so sessions stay in step. While the scoreboard is open, that read covers every logged day.
   - `ui.render`: draws the band, the scoreboard, the help pane and the walkthrough, and (easy mode) the suggested set in the spinner.
 
 ## Requirements
