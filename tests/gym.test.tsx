@@ -6,7 +6,7 @@ import { amount, axisText, barCells, barSvg, bestStreak, bucketDays, bucketLabel
 import { buttonsWidth, canProgress, cells, cheer, customRoutine, heatCells, moveGoal, nextGoal, paceAt, parseCustom, parseFit, pickSwap, progressColor, repSteps, scale, setSizeFor, stepFor, streak, untilText } from '../hooks/lib'
 
 // The test runner has it; the engine's types leave it out.
-declare const setTimeout: (run: () => void, ms: number) => unknown
+declare const setTimeout: (run: (value?: unknown) => void, ms: number) => unknown
 
 const HOME = '/home/t'
 const LOG = `${HOME}/.claude/fitness/log`
