@@ -14,13 +14,14 @@ const MONDAY_9AM = new Date(2026, 9, 5, 9).getTime()
 const world = (
   on: On,
   files = new Map<string, string>(),
-  { introduced = true, store = {} as Record<string, unknown>, now = MONDAY_9AM } = {},
+  { introduced = true, store = {} as Record<string, unknown>, now = MONDAY_9AM, storeGate = Promise.resolve() } = {},
 ) => {
   const clock = mock.clock(on, { now })
   // By hand, not mock.store, so a test can read back what the mod kept.
   const stored = new Map<string, unknown>(Object.entries({ ...(introduced ? { introduced: true } : {}), ...store }))
   on('store.get', ($, e) => ({ value: stored.get(e.key) }))
-  on('store.set', ($, e) => {
+  on('store.set', async ($, e) => {
+    await storeGate
     stored.set(e.key, e.value)
     return { value: undefined }
   })
@@ -1712,6 +1713,34 @@ describe('the scoreboard pane', () => {
     }
     await ui.press({ key: 'range-90' })
     expect(await ui.find({ type: 'Text', text: /LAST 90 DAYS · a bar a week/ })).toBeDefined()
+    expect(stored.get('chartDays')).toBe(90)
+    await ui.unmount()
+  })
+
+  test('a range press redraws at once and returns once the range is kept', async ($, on) => {
+    let finishSave = () => {}
+    const storeGate = new Promise<void>(resolve => {
+      finishSave = resolve
+    })
+    const { stored } = world(on, season(), { storeGate })
+    await start($)
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    let hasReturned = false
+    const press = ui.press({ key: 'range-90' }).then(() => {
+      hasReturned = true
+    })
+    // The save is held: only the redraw can arrive. A few looks let it land.
+    let redrawn = await ui.find({ type: 'Text', text: /LAST 90 DAYS/ })
+    for (let look = 0; look < 50 && redrawn === undefined; look++) {
+      redrawn = await ui.find({ type: 'Text', text: /LAST 90 DAYS/ })
+    }
+    expect(redrawn).toBeDefined()
+    // Time for a press that didn't wait for the save to come back.
+    for (let look = 0; look < 50; look++) await ui.find({ type: 'Text', text: /LAST 90 DAYS/ })
+    expect(hasReturned).toBe(false)
+    finishSave()
+    await press
     expect(stored.get('chartDays')).toBe(90)
     await ui.unmount()
   })
