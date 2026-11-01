@@ -1742,7 +1742,9 @@ describe('the scoreboard pane', () => {
     await fit($, 'streak 90')
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 630 } })
     const chart = await ui.find({ type: 'Raster', key: 'chart' })
-    expect(chart?.props.columns).toBeLessThanOrEqual(512)
+    expect(chart?.props.columns).toBe(449)
+    // The axis spans the chart, not the pane.
+    expect(await ui.find({ type: 'Text', text: /^.{444}today$/ })).toBeDefined()
     await ui.unmount()
   })
 
