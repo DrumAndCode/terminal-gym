@@ -17,7 +17,18 @@ const world = (
   { introduced = true, store = {} as Record<string, unknown>, now = MONDAY_9AM } = {},
 ) => {
   const clock = mock.clock(on, { now })
-  mock.store(on, { ...(introduced ? { introduced: true } : {}), ...store })
+  // By hand, not mock.store, so a test can read back what the mod kept.
+  const stored = new Map<string, unknown>(Object.entries({ ...(introduced ? { introduced: true } : {}), ...store }))
+  on('store.get', ($, e) => ({ value: stored.get(e.key) }))
+  on('store.set', ($, e) => {
+    stored.set(e.key, e.value)
+    return { value: undefined }
+  })
+  on('store.delete', ($, e) => {
+    stored.delete(e.key)
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...stored.keys()] }))
   mock.env(on, { HOME })
   const toasts: string[] = []
   on('fs.read', ($, e) => {
@@ -96,7 +107,7 @@ const world = (
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  return { clock, files, touch, toasts, open, config, calls, registered, below, box }
+  return { clock, files, touch, toasts, open, config, calls, registered, below, box, stored }
 }
 
 // A day's pace file, as the mod writes it beside the count.
@@ -1608,6 +1619,20 @@ describe('scoreboard numbers', () => {
     expect(glyphRow(grid, 0)).toBe('█')
   })
 
+  test('a stack ending inside a cell stands as tall as one color would', () => {
+    const lone = barCells([{ segments: [{ reps: 5, color: GOLD }] }, { segments: [{ reps: 40, color: GOLD }] }], 4)
+    const stack = barCells([{ segments: [{ reps: 2, color: GOLD }, { reps: 3, color: BLUE }] }, { segments: [{ reps: 40, color: GOLD }] }], 4)
+    expect(glyphRow(stack, 4)[0]).toBe(glyphRow(lone, 4)[0])
+    const top = words(stack.cells).subarray(4 * stack.columns * 3, 4 * stack.columns * 3 + 3)
+    expect([...top]).toEqual([0x2585, BLUE, 0x01000000])
+  })
+
+  test('where three colors meet in a cell, the lowest keeps its height', () => {
+    const grid = barCells([{ segments: [{ reps: 12, color: GOLD }, { reps: 1, color: BLUE }, { reps: 9, color: PINK }, { reps: 18, color: GOLD }] }], 1)
+    const row3 = words(grid.cells).subarray(3 * 3, 4 * 3)
+    expect([...row3]).toEqual([0x2584, GOLD, PINK])
+  })
+
   test('a tiny segment still shows beside a huge one', () => {
     const grid = barCells([{ segments: [{ reps: 1, color: GOLD }, { reps: 10000, color: BLUE }] }], 1)
     expect(words(grid.cells)[4 * 3 + 1]).toBe(GOLD)
@@ -1676,7 +1701,7 @@ describe('the scoreboard pane', () => {
   })
 
   test('one chart holds every exercise, and the range buttons change it and stick', async ($, on) => {
-    const { files } = world(on, season())
+    const { stored } = world(on, season())
     await start($)
     await fit($, 'streak')
     const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
@@ -1687,12 +1712,38 @@ describe('the scoreboard pane', () => {
     }
     await ui.press({ key: 'range-90' })
     expect(await ui.find({ type: 'Text', text: /LAST 90 DAYS · a bar a week/ })).toBeDefined()
+    expect(stored.get('chartDays')).toBe(90)
     await ui.unmount()
-    expect(files.size).toBeGreaterThan(0)
+  })
+
+  test('a new session opens on the range kept from the last', async ($, on) => {
+    world(on, season(), { store: { chartDays: 90 } })
     await start($)
-    const back = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
-    expect(await back.find({ type: 'Text', text: /LAST 90 DAYS/ })).toBeDefined()
-    await back.unmount()
+    await fit($, 'streak')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    expect(await ui.find({ type: 'Text', text: /LAST 90 DAYS/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('/fit streak 90 opens a closed scoreboard on that range', async ($, on) => {
+    const { open, calls } = world(on, season())
+    await start($)
+    await fit($, 'streak 90')
+    expect(open.has('gym-week')).toBe(true)
+    expect(calls).toContain('ui.open:gym-week')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...WIDE })
+    expect(await ui.find({ type: 'Text', text: /LAST 90 DAYS/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a pane past the widest Raster keeps the chart and its axis inside it', async ($, on) => {
+    world(on, season())
+    await start($)
+    await fit($, 'streak 90')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 630 } })
+    const chart = await ui.find({ type: 'Raster', key: 'chart' })
+    expect(chart?.props.columns).toBeLessThanOrEqual(512)
+    await ui.unmount()
   })
 
   test('/fit streak 90 picks the range and an open pane stays open', async ($, on) => {
@@ -1769,5 +1820,38 @@ describe('the scoreboard pane', () => {
     await ui.unmount()
     // A Tuesday under the default rotation.
     expect(files.get(`${LOG}/2026-01-06.swap`)).toBe(`${JSON.stringify({ exercise: 'dips', goal: 100 })}\n`)
+  })
+  // Walks the walkthrough to the first preset program.
+  const pickProgram = async ($: Engine) => {
+    await fit($, 'program')
+    const ui = await $.ui.mount({ plugin: 'terminal-gym', surface: 'terminal', ...PANE, requestId: 'gym-onboard' })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'program-1' })
+    await ui.press({ key: 'next' })
+    await ui.press({ key: 'finish' })
+    await ui.unmount()
+  }
+
+  test('a new program leaves today alone, so today follows it', async ($, on) => {
+    const { files } = world(on, new Map([[`${LOG}/2026-10-05`, '40\n']]))
+    await start($)
+    await pickProgram($)
+    expect(files.has(`${LOG}/2026-10-05.swap`)).toBe(false)
+  })
+
+  test('a logged day the old routine left out keeps reading as it did', async ($, on) => {
+    const { files } = world(on, new Map([
+      [`${HOME}/.claude/fitness/routine.json`, `${JSON.stringify({ mon: { exercise: 'dips', goal: 50 } })}\n`],
+      // Sundays, one outside the grid and one in it, with no plan in that routine.
+      [`${LOG}/2026-01-04`, '50\n'],
+      [`${LOG}/2026-10-04`, '60\n'],
+    ]))
+    await start($)
+    await pickProgram($)
+    for (const date of ['2026-01-04', '2026-10-04']) {
+      expect(files.get(`${LOG}/${date}.swap`)).toBe(`${JSON.stringify({ exercise: 'reps', goal: 0 })}\n`)
+    }
+    // An unlogged day in the grid stays unwritten, as before.
+    expect(files.has(`${LOG}/2026-10-03.swap`)).toBe(false)
   })
 })

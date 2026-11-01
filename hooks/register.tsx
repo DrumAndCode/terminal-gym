@@ -597,10 +597,12 @@ const freezePastDays = async ($: Engine, old: Routine) => {
   const recent = lastDays(await $.clock.now(), HISTORY_DAYS).slice(0, -1)
   const today = dayKey(await $.clock.now())
   // Every logged day too: all-time totals credit each one to its exercise.
-  const logged = (await loggedDates($, logDir)).filter(date => date < today).map(noonOf)
-  for (const ms of new Set([...logged, ...recent])) {
-    const path = `${logDir}/${dayKey(ms)}.swap`
-    const plan = old[weekdayKey(ms)]
+  const logged = (await loggedDates($, logDir)).filter(date => date < today)
+  for (const ms of new Set([...logged.map(noonOf), ...recent])) {
+    const date = dayKey(ms)
+    const path = `${logDir}/${date}.swap`
+    // A logged day the old routine left out stays as it reads now, not the new plan's.
+    const plan = old[weekdayKey(ms)] ?? (logged.includes(date) ? { exercise: 'reps', goal: 0 } : undefined)
     if (plan !== undefined && !(await $.fs.exists(path))) await $.fs.write(path, `${JSON.stringify(plan)}\n`)
   }
 }

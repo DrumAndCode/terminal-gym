@@ -41,6 +41,8 @@ type Data = {
 }
 
 const METER = 10
+// A Raster's widest.
+const MAX_CHART_COLUMNS = 512
 const SWATCH = '█ '
 // The legend's goal and short marks: the page's ink, since hue names the exercise.
 const INK = 0xe8e6e0
@@ -121,7 +123,8 @@ export const drawScoreboard = (
     )
   })
 
-  const bars = chartBars(logged, colors, now, range, cols)
+  const chartColumns = Math.min(cols, MAX_CHART_COLUMNS)
+  const bars = chartBars(logged, colors, now, range, chartColumns)
   const peak = Math.max(0, ...bars.map(barReps))
   const rangeRows = totals.flatMap(row => {
     const { total, sessions, change } = rangeSummary(logged, row.exercise, now, range)
@@ -137,15 +140,15 @@ export const drawScoreboard = (
       </Box>,
     ]
   })
-  const alt = `Reps per ${bucketDays(range, cols) === 1 ? 'day' : 'period'}, last ${range} days, peak ${commas(peak)}`
+  const alt = `Reps per ${bucketDays(range, chartColumns) === 1 ? 'day' : 'period'}, last ${range} days, peak ${commas(peak)}`
   const chart =
     Raster !== undefined ? (
-      <Raster key="chart" {...barCells(bars, cols)} />
+      <Raster key="chart" {...barCells(bars, chartColumns)} />
     ) : Svg !== undefined ? (
       <Svg source={barSvg(bars)} alt={alt} width={bars.length * 10} height={80} />
     ) : null
 
-  const rangeTitle = `LAST ${range} DAYS · ${bucketLabel(bucketDays(range, cols))} · peak ${commas(peak)}`
+  const rangeTitle = `LAST ${range} DAYS · ${bucketLabel(bucketDays(range, chartColumns))} · peak ${commas(peak)}`
   const rangeButtons = (
     <Box>
       {RANGES.map(({ days: span, label }, i) => (
@@ -168,7 +171,7 @@ export const drawScoreboard = (
       {rangeRows.length > 0 ? (
         <Box flexDirection="column">
           {chart}
-          <Text dimColor>{axisText(range, now, chartWidth(bars.length, cols))}</Text>
+          <Text dimColor>{axisText(range, now, chartWidth(bars.length, chartColumns))}</Text>
           {rangeRows}
         </Box>
       ) : (

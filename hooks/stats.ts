@@ -171,8 +171,8 @@ export const chartWidth = (count: number, columns: number) => {
   return count * (width + gap) - gap
 }
 
-// Five rows of eighth blocks, so a bar has 40 heights. A stack's every segment
-// shows, and an empty day leaves a dim tick: the row reads as a timeline.
+// Five rows of eighth blocks, so a bar has 40 heights. An empty day leaves a dim
+// tick, so the row reads as a timeline.
 const CHART_ROWS = 5
 const EIGHTHS = CHART_ROWS * 8
 
@@ -184,6 +184,20 @@ const barEighths = (bar: Bar, peak: number) => {
     .slice(0, EIGHTHS)
 }
 
+const mostOf = (colors: readonly number[]) =>
+  [...new Set(colors)].reduce((best, color) =>
+    colors.filter(c => c === color).length > colors.filter(c => c === best).length ? color : best)
+
+// A cell draws two colors at most: a block over the background. The top of a bar
+// needs that background empty to keep its height, so it takes one color. A full
+// cell where three segments meet gives the smallest upper one to its neighbor.
+const cellParts = (cell: readonly number[]): [glyph: number, below: number, above: number] => {
+  if (cell.length < 8) return [0x2580 + cell.length, mostOf(cell), DEFAULT]
+  const below = cell[0] ?? DEFAULT
+  const rest = cell.filter(color => color !== below)
+  return rest.length === 0 ? [0x2588, below, DEFAULT] : [0x2580 + 8 - rest.length, below, mostOf(rest)]
+}
+
 export const barCells = (bars: readonly Bar[], columns: number) => {
   const { width, gap } = barShape(bars.length, columns)
   const wide = chartWidth(bars.length, columns)
@@ -193,13 +207,11 @@ export const barCells = (bars: readonly Bar[], columns: number) => {
   bars.forEach((bar, i) => {
     const eighths = barEighths(bar, peak)
     for (let row = 0; row < CHART_ROWS; row++) {
-      // A cell holds two colors: the lower block's over the background's.
       const cell = eighths.slice((CHART_ROWS - 1 - row) * 8, (CHART_ROWS - row) * 8)
-      const [below, above = DEFAULT] = [...new Set(cell)]
-      if (below === undefined) continue
-      const level = cell.filter(color => color === below).length
+      if (cell.length === 0) continue
+      const [glyph, below, above] = cellParts(cell)
       for (let col = 0; col < width; col++) {
-        words.set([0x2580 + level, below, above], (row * wide + i * (width + gap) + col) * 3)
+        words.set([glyph, below, above], (row * wide + i * (width + gap) + col) * 3)
       }
     }
   })
