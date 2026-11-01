@@ -1736,6 +1736,8 @@ describe('the scoreboard pane', () => {
       redrawn = await ui.find({ type: 'Text', text: /LAST 90 DAYS/ })
     }
     expect(redrawn).toBeDefined()
+    // Time for a press that didn't wait for the save to come back.
+    for (let look = 0; look < 50; look++) await ui.find({ type: 'Text', text: /LAST 90 DAYS/ })
     expect(hasReturned).toBe(false)
     finishSave()
     await press
